@@ -1,0 +1,23 @@
+# Local development overrides. Secrets still come from the environment.
+
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/ecommerce}
+    username: ${DATABASE_USERNAME:ecommerce}
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+
+app:
+  cors:
+    origins: ${CORS_ORIGINS:http://localhost:3000}
+
+springdoc:
+  swagger-ui:
+    enabled: true
+  api-docs:
+    enabled: true
+
+logging:
+  level:
+    com.example.ecommerce: DEBUG

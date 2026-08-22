@@ -58,6 +58,9 @@ coverage/
 *.exec
 *.hprof
 
+# Local toolchain downloads (not part of the repository)
+.tools/
+
 # Local Helm / Kubernetes overrides
 **/values-local.yaml
 **/values-secrets.yaml

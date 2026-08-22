@@ -1,0 +1,5 @@
+# Automated tests. Store URLs and JWT_SECRET come from the test harness.
+
+app:
+  cors:
+    origins: ${CORS_ORIGINS:http://localhost}

@@ -1,0 +1,46 @@
+# Production. Every connection string, secret, and origin must be provided.
+# Development host fallbacks are not used.
+
+spring:
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+  data:
+    redis:
+      url: ${REDIS_URL}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+    expiration-ms: ${JWT_EXPIRATION}
+  cors:
+    origins: ${CORS_ORIGINS}
+  pagination:
+    default-page-size: ${APP_PAGINATION_DEFAULT_PAGE_SIZE:20}
+    max-page-size: ${APP_PAGINATION_MAX_PAGE_SIZE:100}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+    env:
+      show-values: never
+
+springdoc:
+  swagger-ui:
+    enabled: false
+  api-docs:
+    enabled: false
+
+logging:
+  level:
+    root: ${LOGGING_LEVEL_ROOT:WARN}
+    com.example.ecommerce: INFO
