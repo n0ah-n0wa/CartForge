@@ -3,14 +3,22 @@ package com.example.ecommerce;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ecommerce.common.config.ApplicationProperties;
+import java.sql.Connection;
+import java.sql.SQLException;
+import javax.sql.DataSource;
+import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.MigrationState;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.actuate.health.HealthContributorRegistry;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.cache.interceptor.CacheInterceptor;
 import org.springframework.cache.interceptor.LoggingCacheErrorHandler;
-import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -57,6 +65,21 @@ class EcommerceApplicationTest {
     @Autowired
     private CacheInterceptor cacheInterceptor;
 
+    @Autowired
+    private Flyway flyway;
+
+    @Autowired
+    private DataSource dataSource;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private Environment environment;
+
+    @Autowired
+    private HealthContributorRegistry healthContributorRegistry;
+
     @Test
     void contextLoads() {
         assertThat(restTemplate).isNotNull();
@@ -79,6 +102,44 @@ class EcommerceApplicationTest {
         assertThat(liveness.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(readiness.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(readiness.getBody()).doesNotContain("redis");
+    }
+
+    @Test
+    void connectsToPostgreSQL() throws SQLException {
+        try (Connection connection = dataSource.getConnection()) {
+            assertThat(connection.getMetaData().getDatabaseProductName()).isEqualToIgnoringCase("PostgreSQL");
+        }
+    }
+
+    @Test
+    void flywayAppliesTheInfrastructureBaseline() {
+        assertThat(environment.getProperty("spring.flyway.enabled")).isEqualTo("true");
+        assertThat(flyway.info().current()).isNotNull();
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+        assertThat(flyway.info().current().getDescription()).isEqualTo("schema baseline");
+        assertThat(flyway.info().current().getState()).isEqualTo(MigrationState.SUCCESS);
+
+        Integer applied = jdbcTemplate.queryForObject(
+                "select count(*) from flyway_schema_history where version = '1' and success",
+                Integer.class);
+        assertThat(applied).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                        "select obj_description('public'::regnamespace, 'pg_namespace')",
+                        String.class))
+                .contains("Flyway");
+    }
+
+    @Test
+    void hibernateValidatesSchemaRatherThanGeneratingIt() {
+        assertThat(environment.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
+        assertThat(environment.getProperty("spring.jpa.hibernate.naming.physical-strategy"))
+                .isEqualTo("org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy");
+        assertThat(environment.getProperty("spring.jpa.properties.hibernate.jdbc.time_zone")).isEqualTo("UTC");
+    }
+
+    @Test
+    void databaseHealthContributorIsRegistered() {
+        assertThat(healthContributorRegistry.getContributor("db")).isNotNull();
     }
 
     @Test

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (mandated by `SPECIFICATIONS.md` v1.0.0)
 - **Date:** 2026-08-22
-- **Implementation:** not started
+- **Implementation:** convention only. Versioned rows use `VersionedEntity` (`@Version` / `version BIGINT`). Mapping and 409 handling belong with checkout.
 
 ## Context
 

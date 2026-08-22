@@ -1,4 +1,13 @@
 # Automated tests. Store URLs and JWT_SECRET come from the test harness.
+# Schema still comes from Flyway; Hibernate only validates.
+
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
 
 app:
   cors:

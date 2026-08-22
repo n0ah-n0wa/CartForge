@@ -4,6 +4,11 @@ spring:
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/ecommerce}
     username: ${DATABASE_USERNAME:ecommerce}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
   data:
     redis:
       url: ${REDIS_URL:redis://localhost:6379}

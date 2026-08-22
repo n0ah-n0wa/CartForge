@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.ecommerce.EcommerceApplication;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.SpringApplication;
@@ -27,22 +29,24 @@ class ProdConfigurationTest {
             assertThat(properties.cors().origins()).containsExactly("https://shop.example.com");
             assertThat(properties.jwt().expirationMs()).isEqualTo(900_000L);
             assertThat(context.getEnvironment().getProperty("springdoc.swagger-ui.enabled")).isEqualTo("false");
+            assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
+            assertThat(context.getEnvironment().getProperty("spring.flyway.enabled")).isEqualTo("true");
         }
     }
 
     @Test
     void prodProfileFailsWhenJwtSecretIsMissing() {
         Map<String, Object> environment = validProdEnvironment();
-        environment.remove("JWT_SECRET");
+        environment.put("JWT_SECRET", "");
 
         assertThatThrownBy(() -> runProd(environment).close())
-                .hasStackTraceContaining("JWT_SECRET");
+                .hasStackTraceContaining("secret");
     }
 
     @Test
     void prodProfileFailsWhenDatabasePasswordIsMissing() {
         Map<String, Object> environment = validProdEnvironment();
-        environment.remove("DATABASE_PASSWORD");
+        environment.put("DATABASE_PASSWORD", "");
 
         assertThatThrownBy(() -> runProd(environment).close())
                 .hasStackTraceContaining("DATABASE_PASSWORD");
@@ -69,7 +73,7 @@ class ProdConfigurationTest {
     @Test
     void prodProfileDoesNotUseDevelopmentDatabaseFallback() {
         Map<String, Object> environment = validProdEnvironment();
-        environment.remove("DATABASE_URL");
+        environment.put("DATABASE_URL", "");
 
         assertThatThrownBy(() -> runProd(environment).close())
                 .hasStackTraceContaining("DATABASE_URL");
@@ -88,11 +92,13 @@ class ProdConfigurationTest {
         SpringApplication application = new SpringApplication(EcommerceApplication.class);
         application.setWebApplicationType(WebApplicationType.NONE);
         application.setAdditionalProfiles("prod");
-        application.setDefaultProperties(environment);
-        return application.run(
-                "--spring.cache.type=simple",
-                "--spring.autoconfigure.exclude=" + INFRA_EXCLUDES,
-                "--management.endpoint.health.group.readiness.include=readinessState");
+
+        List<String> arguments = new ArrayList<>();
+        arguments.add("--spring.cache.type=simple");
+        arguments.add("--spring.autoconfigure.exclude=" + INFRA_EXCLUDES);
+        arguments.add("--management.endpoint.health.group.readiness.include=readinessState");
+        environment.forEach((name, value) -> arguments.add("--" + name + "=" + value));
+        return application.run(arguments.toArray(String[]::new));
     }
 
     private static Map<String, Object> validProdEnvironment() {

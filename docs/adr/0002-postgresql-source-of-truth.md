@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (mandated by `SPECIFICATIONS.md` v1.0.0)
 - **Date:** 2026-08-22
-- **Implementation:** not started
+- **Implementation:** connection, Flyway, validate-only Hibernate, and shared conventions in `docs/database.md` / `common.persistence`. Domain tables are not created yet.
 
 ## Context
 

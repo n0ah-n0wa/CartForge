@@ -1,6 +1,6 @@
 # Architecture
 
-**Status:** planned. This document describes the architecture required by `SPECIFICATIONS.md`. No application modules have been implemented yet.
+**Status:** foundation in progress. Persistence conventions are documented in [database.md](database.md). Business APIs are not implemented yet.
 
 ## Purpose
 
@@ -72,7 +72,7 @@ Typical contents of a feature package: `controller`, `service`, `repository`, `e
 
 Inventory is the exception: it has a service and DTOs only. Stock quantity lives on `Product`. There is no inventory HTTP API.
 
-`common` holds configuration, exception handling, security filters, validation, pagination, and logging. It is not a business domain.
+`common` holds configuration, exception handling, security filters, validation, pagination, logging, and persistence conventions (`common.persistence`). It is not a business domain.
 
 Administration appears on the runtime diagram as a capability. The prescribed package tree has no `admin` package. Administrative endpoints belong in the feature that owns the resource (catalog writes on product/category; `/api/v1/admin/orders` on order).
 
