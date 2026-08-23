@@ -49,9 +49,7 @@ public class CategoryController {
     @Operation(summary = "List active categories", description = "Public catalog listing. Inactive categories are omitted.")
     @ApiResponse(responseCode = "200", description = "Active categories ordered by name")
     public List<CategoryResponse> list() {
-        return categoryService.listActive().stream()
-                .map(categoryMapper::toResponse)
-                .toList();
+        return categoryService.listActiveResponses();
     }
 
     @GetMapping("/{id}")
@@ -61,7 +59,7 @@ public class CategoryController {
     @ApiResponse(responseCode = "200", description = "Category found")
     @ApiResponse(responseCode = "404", description = "Category not found or inactive for public callers")
     public CategoryResponse get(@PathVariable Long id) {
-        return categoryMapper.toResponse(categoryService.getById(id, currentUser.isAdmin()));
+        return categoryService.getResponse(id, currentUser.isAdmin());
     }
 
     @PostMapping

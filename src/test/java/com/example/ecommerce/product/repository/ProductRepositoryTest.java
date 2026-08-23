@@ -10,6 +10,7 @@ import com.example.ecommerce.category.service.CategoryService;
 import com.example.ecommerce.common.persistence.CurrencyCode;
 import com.example.ecommerce.common.persistence.PersistenceConventions;
 import com.example.ecommerce.product.entity.Product;
+import com.example.ecommerce.product.service.ProductSearchCriteria;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -21,6 +22,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -232,12 +234,47 @@ class ProductRepositoryTest {
         productRepository.saveAndFlush(hidden);
         entityManager.clear();
 
-        var page = productRepository.findByActiveTrue(PageRequest.of(0, 10));
+        var page = productRepository.findAll(
+                ProductSpecifications.from(ProductSearchCriteria.of(null, null, null, null, 0, 10, null)),
+                PageRequest.of(0, 10));
 
         assertThat(page.getContent()).hasSize(1);
-        Product listed = page.getContent().get(0);
+        Product listed = page.getContent().getFirst();
         assertThat(listed.getSlug()).isEqualTo("keyboard");
         assertThat(Hibernate.isInitialized(listed.getCategory())).isTrue();
+    }
+
+    @Test
+    void catalogSearchHonorsFiltersSortAndPageBounds() {
+        Category books = persistedCategory("Books", "books");
+        Category games = persistedCategory("Games", "games");
+        productRepository.saveAndFlush(pricedProduct("A-001", "Zebra Laptop", "zebra", "30.00", books));
+        productRepository.saveAndFlush(pricedProduct("B-001", "Alpha Mouse", "alpha", "10.00", books));
+        productRepository.saveAndFlush(pricedProduct("C-001", "Middle Pad", "middle", "20.00", books));
+        productRepository.saveAndFlush(pricedProduct("G-001", "Laptop Game", "laptop-game", "25.00", games));
+        Product inactive = pricedProduct("X-001", "Laptop Hidden", "laptop-hidden", "15.00", books);
+        inactive.deactivate();
+        productRepository.saveAndFlush(inactive);
+        entityManager.clear();
+
+        var firstPage = productRepository.findAll(
+                ProductSpecifications.from(ProductSearchCriteria.of(
+                        "books", new BigDecimal("10.00"), new BigDecimal("30.00"), "laptop", 0, 2, null)),
+                PageRequest.of(0, 2, Sort.by(Sort.Direction.ASC, "price").and(Sort.by("id"))));
+        var secondPage = productRepository.findAll(
+                ProductSpecifications.from(ProductSearchCriteria.of(
+                        "books", new BigDecimal("10.00"), new BigDecimal("30.00"), "laptop", 1, 2, null)),
+                PageRequest.of(1, 2, Sort.by(Sort.Direction.ASC, "price").and(Sort.by("id"))));
+
+        assertThat(firstPage.getTotalElements()).isEqualTo(1);
+        assertThat(firstPage.getContent()).extracting(Product::getSku).containsExactly("A-001");
+        assertThat(secondPage.getContent()).isEmpty();
+
+        var byCategoryAndPrice = productRepository.findAll(
+                ProductSpecifications.from(ProductSearchCriteria.of(
+                        "books", new BigDecimal("15.00"), new BigDecimal("25.00"), null, 0, 10, null)),
+                PageRequest.of(0, 10, Sort.by(Sort.Direction.ASC, "price").and(Sort.by("id"))));
+        assertThat(byCategoryAndPrice.getContent()).extracting(Product::getSku).containsExactly("C-001");
     }
 
     @Test
@@ -261,7 +298,9 @@ class ProductRepositoryTest {
                 PersistenceConventions.indexName("products", "category_id"),
                 PersistenceConventions.indexName("products", "active"),
                 PersistenceConventions.indexName("products", "price"),
-                PersistenceConventions.indexName("products", "name"));
+                PersistenceConventions.indexName("products", "name"),
+                "ix_products_search_text_trgm",
+                "ix_products_active_category_price");
     }
 
     private Category persistedCategory(String name, String slug) {
@@ -271,6 +310,10 @@ class ProductRepositoryTest {
     private static Product product(String sku, String slug, Category category) {
         return Product.create(
                 sku, "Keyboard", slug, "Mechanical", new BigDecimal("49.50"), null, 5, category);
+    }
+
+    private static Product pricedProduct(String sku, String name, String slug, String price, Category category) {
+        return Product.create(sku, name, slug, null, new BigDecimal(price), null, 5, category);
     }
 
     private void insertProduct(String sku, String slug, String price, int stock, Long categoryId) {

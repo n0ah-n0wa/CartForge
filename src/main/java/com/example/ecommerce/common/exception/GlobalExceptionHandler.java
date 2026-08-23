@@ -3,8 +3,10 @@ package com.example.ecommerce.common.exception;
 import com.example.ecommerce.category.service.CategoryInUseException;
 import com.example.ecommerce.category.service.CategoryNotFoundException;
 import com.example.ecommerce.category.service.DuplicateCategoryException;
+import com.example.ecommerce.common.pagination.InvalidSortException;
 import com.example.ecommerce.product.service.DuplicateProductException;
 import com.example.ecommerce.product.service.InvalidProductCategoryException;
+import com.example.ecommerce.product.service.InvalidProductQueryException;
 import com.example.ecommerce.product.service.ProductNotFoundException;
 import com.example.ecommerce.product.service.ProductVersionConflictException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -116,6 +118,18 @@ public class GlobalExceptionHandler {
                 "VALIDATION_ERROR",
                 "Request body is missing or malformed",
                 request);
+    }
+
+    @ExceptionHandler(InvalidProductQueryException.class)
+    ResponseEntity<ApiErrorResponse> invalidProductQuery(
+            InvalidProductQueryException exception,
+            HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(InvalidSortException.class)
+    ResponseEntity<ApiErrorResponse> invalidSort(InvalidSortException exception, HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, "INVALID_SORT", exception.getMessage(), request);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

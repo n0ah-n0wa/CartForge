@@ -1,12 +1,17 @@
 package com.example.ecommerce.category.service;
 
+import com.example.ecommerce.category.dto.CategoryResponse;
 import com.example.ecommerce.category.dto.CreateCategoryCommand;
 import com.example.ecommerce.category.dto.PatchCategoryCommand;
 import com.example.ecommerce.category.dto.UpdateCategoryCommand;
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.category.mapper.CategoryMapper;
 import com.example.ecommerce.category.repository.CategoryRepository;
+import com.example.ecommerce.common.cache.CatalogCaches;
 import java.util.List;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,9 +33,24 @@ public class CategoryService {
         this.productReference = productReference;
     }
 
+    @Cacheable(cacheNames = CatalogCaches.CATEGORIES, key = "'" + CatalogCaches.ACTIVE_LIST_KEY + "'")
+    @Transactional(readOnly = true)
+    public List<CategoryResponse> listActiveResponses() {
+        return listActive().stream().map(categoryMapper::toResponse).toList();
+    }
+
     @Transactional(readOnly = true)
     public List<Category> listActive() {
         return categoryRepository.findByActiveTrueOrderByNameAsc();
+    }
+
+    @Cacheable(
+            cacheNames = CatalogCaches.CATEGORY,
+            key = "#id",
+            condition = "!#includeInactive")
+    @Transactional(readOnly = true)
+    public CategoryResponse getResponse(Long id, boolean includeInactive) {
+        return categoryMapper.toResponse(getById(id, includeInactive));
     }
 
     @Transactional(readOnly = true)
@@ -42,6 +62,7 @@ public class CategoryService {
         return category;
     }
 
+    @CacheEvict(cacheNames = CatalogCaches.CATEGORIES, allEntries = true)
     public Category create(CreateCategoryCommand command) {
         ensureUniqueIdentity(command.name(), command.slug(), null);
         try {
@@ -51,6 +72,16 @@ public class CategoryService {
         }
     }
 
+    /**
+     * Category identity is embedded in product responses, so product caches must
+     * be cleared when a category changes.
+     */
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORY, key = "#id"),
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORIES, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public Category update(Long id, UpdateCategoryCommand command) {
         Category category = require(id);
         ensureUniqueIdentity(command.name(), command.slug(), id);
@@ -62,6 +93,12 @@ public class CategoryService {
         }
     }
 
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORY, key = "#id"),
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORIES, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public Category patch(Long id, PatchCategoryCommand command) {
         Category category = require(id);
         String nextName = command.name() != null ? command.name() : category.getName();
@@ -75,14 +112,30 @@ public class CategoryService {
         }
     }
 
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORY, key = "#id"),
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORIES, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public void deactivate(Long id) {
         require(id).deactivate();
     }
 
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORY, key = "#id"),
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORIES, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public void activate(Long id) {
         require(id).activate();
     }
 
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORY, key = "#id"),
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORIES, allEntries = true)
+    })
     public void delete(Long id) {
         Category category = require(id);
         if (productReference.countByCategoryId(id) > 0) {
@@ -91,6 +144,12 @@ public class CategoryService {
         categoryRepository.delete(category);
     }
 
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORY, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORIES, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public void reassignAndDelete(Long sourceId, Long targetId) {
         if (sourceId.equals(targetId)) {
             throw new IllegalArgumentException("Reassignment target must be a different category");

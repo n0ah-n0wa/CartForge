@@ -66,6 +66,13 @@ public class Product extends VersionedEntity {
     @Column(nullable = false)
     private boolean active;
 
+    /**
+     * PostgreSQL-generated lowercased name/sku/description used for catalog
+     * search. Never written by the application.
+     */
+    @Column(name = "search_text", insertable = false, updatable = false)
+    private String searchText;
+
     protected Product() {
     }
 

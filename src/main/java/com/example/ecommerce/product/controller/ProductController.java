@@ -1,5 +1,6 @@
 package com.example.ecommerce.product.controller;
 
+import com.example.ecommerce.common.config.ApplicationProperties;
 import com.example.ecommerce.common.pagination.PageResponse;
 import com.example.ecommerce.common.security.CurrentUserProvider;
 import com.example.ecommerce.common.security.RequireAdmin;
@@ -9,13 +10,18 @@ import com.example.ecommerce.product.dto.ProductResponse;
 import com.example.ecommerce.product.dto.UpdateProductCommand;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.product.mapper.ProductMapper;
+import com.example.ecommerce.product.service.ProductSearchCriteria;
 import com.example.ecommerce.product.service.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.math.BigDecimal;
 import java.net.URI;
+import java.util.Arrays;
+import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,32 +42,60 @@ public class ProductController {
     private final ProductService productService;
     private final ProductMapper productMapper;
     private final CurrentUserProvider currentUser;
+    private final ApplicationProperties properties;
 
     public ProductController(
             ProductService productService,
             ProductMapper productMapper,
-            CurrentUserProvider currentUser) {
+            CurrentUserProvider currentUser,
+            ApplicationProperties properties) {
         this.productService = productService;
         this.productMapper = productMapper;
         this.currentUser = currentUser;
+        this.properties = properties;
     }
 
     @GetMapping
     @Operation(
-            summary = "List active products",
-            description = "Public catalog listing foundation. Returns active products only, "
-                    + "paged and ordered by name. Advanced search and filtering are not implemented yet.")
+            summary = "Search active products",
+            description = "Public catalog search over active products. Supports category slug, "
+                    + "minPrice/maxPrice, case-insensitive text search (name/sku/description), "
+                    + "allowlisted sorting (name, price, sku, createdAt, stockQuantity), and "
+                    + "bounded pagination. Example: "
+                    + "?category=electronics&minPrice=100&maxPrice=2000&search=laptop&sort=price,asc. "
+                    + "Page size is capped by app.pagination.max-page-size.")
     @ApiResponse(responseCode = "200", description = "Paged active products")
+    @ApiResponse(responseCode = "400", description = "Invalid page, size, sort, or filter parameter")
     public PageResponse<ProductResponse> list(
             @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer size) {
-        PageResponse<Product> products = productService.listActive(page, size);
-        return new PageResponse<>(
-                products.content().stream().map(productMapper::toResponse).toList(),
-                products.page(),
-                products.size(),
-                products.totalElements(),
-                products.totalPages());
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) BigDecimal minPrice,
+            @RequestParam(required = false) BigDecimal maxPrice,
+            @RequestParam(required = false) String search,
+            HttpServletRequest request) {
+        // Read raw sort values so "sort=price,asc" stays one token. Binding to
+        // List/String[] would CSV-split on the comma and treat "asc" as a field name.
+        // Page/size are resolved here so Redis cache keys match the query actually run.
+        ProductSearchCriteria criteria = ProductSearchCriteria.of(
+                category,
+                minPrice,
+                maxPrice,
+                search,
+                page,
+                size,
+                sortParams(request),
+                properties.pagination().defaultPageSize(),
+                properties.pagination().maxPageSize());
+        return productService.searchResponses(criteria);
+    }
+
+    private static List<String> sortParams(HttpServletRequest request) {
+        String[] values = request.getParameterValues("sort");
+        if (values == null || values.length == 0) {
+            return List.of();
+        }
+        return Arrays.asList(values);
     }
 
     @GetMapping("/{id}")
@@ -71,7 +105,7 @@ public class ProductController {
     @ApiResponse(responseCode = "200", description = "Product found")
     @ApiResponse(responseCode = "404", description = "Product not found or inactive for public callers")
     public ProductResponse get(@PathVariable Long id) {
-        return productMapper.toResponse(productService.getById(id, currentUser.isAdmin()));
+        return productService.getResponse(id, currentUser.isAdmin());
     }
 
     @PostMapping

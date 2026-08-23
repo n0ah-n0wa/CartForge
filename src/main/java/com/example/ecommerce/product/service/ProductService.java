@@ -2,19 +2,26 @@ package com.example.ecommerce.product.service;
 
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.category.repository.CategoryRepository;
+import com.example.ecommerce.common.cache.CatalogCaches;
 import com.example.ecommerce.common.config.ApplicationProperties;
+import com.example.ecommerce.common.pagination.PageRequests;
 import com.example.ecommerce.common.pagination.PageResponse;
 import com.example.ecommerce.product.dto.CreateProductCommand;
 import com.example.ecommerce.product.dto.PatchProductCommand;
+import com.example.ecommerce.product.dto.ProductResponse;
 import com.example.ecommerce.product.dto.UpdateProductCommand;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.product.mapper.ProductMapper;
 import com.example.ecommerce.product.repository.ProductRepository;
+import com.example.ecommerce.product.repository.ProductSpecifications;
 import java.util.Locale;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,21 +47,55 @@ public class ProductService {
     }
 
     /**
-     * Public listing foundation: active products only, paged, ordered by name.
-     * Advanced search and filtering are intentionally deferred.
+     * Cached public catalog search. Values are DTOs so Redis never stores Hibernate
+     * entities; PostgreSQL remains the source of truth.
+     */
+    @Cacheable(cacheNames = CatalogCaches.PRODUCTS, key = "#criteria.cacheKey()")
+    @Transactional(readOnly = true)
+    public PageResponse<ProductResponse> searchResponses(ProductSearchCriteria criteria) {
+        PageResponse<Product> page = search(criteria);
+        return new PageResponse<>(
+                page.content().stream().map(productMapper::toResponse).toList(),
+                page.page(),
+                page.size(),
+                page.totalElements(),
+                page.totalPages());
+    }
+
+    /**
+     * Public catalog search: active products only, with optional category,
+     * price range, and text filters, plus allowlisted sorting and bounded paging.
      */
     @Transactional(readOnly = true)
-    public PageResponse<Product> listActive(Integer page, Integer size) {
-        int pageNumber = page == null || page < 0 ? 0 : page;
-        int pageSize = resolvePageSize(size);
-        Page<Product> result = productRepository.findByActiveTrue(
-                PageRequest.of(pageNumber, pageSize, Sort.by(Sort.Direction.ASC, "name")));
+    public PageResponse<Product> search(ProductSearchCriteria criteria) {
+        Sort resolvedSort = ProductSortSupport.ALLOWED.resolve(criteria.sort());
+        Pageable pageable = PageRequests.of(
+                criteria.page(),
+                criteria.size(),
+                properties.pagination().defaultPageSize(),
+                properties.pagination().maxPageSize(),
+                resolvedSort);
+        Page<Product> result = productRepository.findAll(ProductSpecifications.from(criteria), pageable);
         return new PageResponse<>(
                 result.getContent(),
                 result.getNumber(),
                 result.getSize(),
                 result.getTotalElements(),
                 result.getTotalPages());
+    }
+
+    /**
+     * Cached product lookup for public (active-only) reads. Admin lookups that may
+     * include inactive products bypass the cache so inactive data is never served
+     * from a public key.
+     */
+    @Cacheable(
+            cacheNames = CatalogCaches.PRODUCT,
+            key = "#id",
+            condition = "!#includeInactive")
+    @Transactional(readOnly = true)
+    public ProductResponse getResponse(Long id, boolean includeInactive) {
+        return productMapper.toResponse(getById(id, includeInactive));
     }
 
     @Transactional(readOnly = true)
@@ -67,6 +108,7 @@ public class ProductService {
         return product;
     }
 
+    @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
     public Product create(CreateProductCommand command) {
         Category category = requireActiveCategory(command.categoryId());
         ensureUniqueSku(command.sku(), null);
@@ -80,6 +122,10 @@ public class ProductService {
         }
     }
 
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, key = "#id"),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public Product update(Long id, UpdateProductCommand command) {
         Product product = requireWithCategory(id);
         assertVersion(product, command.version());
@@ -89,6 +135,10 @@ public class ProductService {
         return flushProduct(product, product.getSku(), command.slug());
     }
 
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, key = "#id"),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public Product patch(Long id, PatchProductCommand command) {
         Product product = requireWithCategory(id);
         assertVersion(product, command.version());
@@ -107,6 +157,10 @@ public class ProductService {
      * Soft-deactivates the product. Historical order lines keep their product
      * reference, so physical deletion is not used for the public DELETE API.
      */
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, key = "#id"),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public Product deactivate(Long id, Long version) {
         Product product = requireWithCategory(id);
         assertVersion(product, version);
@@ -169,15 +223,6 @@ public class ProductService {
         } catch (DataIntegrityViolationException duplicate) {
             throw translateDuplicate(duplicate, sku, slug);
         }
-    }
-
-    private int resolvePageSize(Integer size) {
-        int defaultSize = properties.pagination().defaultPageSize();
-        int maxSize = properties.pagination().maxPageSize();
-        if (size == null || size < 1) {
-            return defaultSize;
-        }
-        return Math.min(size, maxSize);
     }
 
     private static DuplicateProductException translateDuplicate(

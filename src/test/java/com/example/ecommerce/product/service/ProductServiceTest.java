@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.category.repository.CategoryRepository;
 import com.example.ecommerce.common.config.ApplicationProperties;
+import com.example.ecommerce.common.pagination.InvalidSortException;
 import com.example.ecommerce.common.pagination.PageResponse;
 import com.example.ecommerce.common.persistence.CurrencyCode;
 import com.example.ecommerce.product.dto.CreateProductCommand;
@@ -24,10 +25,13 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -53,19 +57,71 @@ class ProductServiceTest {
     }
 
     @Test
-    void listActiveReturnsPagedActiveProducts() {
+    void searchReturnsPagedActiveProductsWithDefaultSort() {
         Category category = Category.create("Books", "books", null);
         Product product = product(category, 0L);
-        when(productRepository.findByActiveTrue(any(Pageable.class))).thenAnswer(invocation -> {
-            Pageable pageable = invocation.getArgument(0);
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        when(productRepository.findAll(any(Specification.class), pageableCaptor.capture())).thenAnswer(invocation -> {
+            Pageable pageable = invocation.getArgument(1);
             return new PageImpl<>(List.of(product), pageable, 1);
         });
 
-        PageResponse<Product> page = productService.listActive(0, 10);
+        PageResponse<Product> page = productService.search(ProductSearchCriteria.of(
+                null, null, null, null, 0, 10, null));
 
         assertThat(page.content()).containsExactly(product);
+        assertThat(page.page()).isZero();
         assertThat(page.size()).isEqualTo(10);
         assertThat(page.totalElements()).isEqualTo(1);
+        assertThat(page.totalPages()).isEqualTo(1);
+        assertThat(pageableCaptor.getValue().getSort().getOrderFor("name").getDirection())
+                .isEqualTo(Sort.Direction.ASC);
+        assertThat(pageableCaptor.getValue().getSort().getOrderFor("id")).isNotNull();
+    }
+
+    @Test
+    void searchAppliesAllowlistedSortAndCapsPageSize() {
+        when(productRepository.findAll(any(Specification.class), any(Pageable.class))).thenAnswer(invocation -> {
+            Pageable pageable = invocation.getArgument(1);
+            return new PageImpl<>(List.of(), pageable, 0);
+        });
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+
+        productService.search(ProductSearchCriteria.of(
+                null, null, null, null, 1, 500, List.of("price,desc")));
+
+        verify(productRepository).findAll(any(Specification.class), pageableCaptor.capture());
+        Pageable pageable = pageableCaptor.getValue();
+        assertThat(pageable.getPageNumber()).isEqualTo(1);
+        assertThat(pageable.getPageSize()).isEqualTo(100);
+        assertThat(pageable.getSort().getOrderFor("price").getDirection()).isEqualTo(Sort.Direction.DESC);
+    }
+
+    @Test
+    void searchRejectsDisallowedSortFields() {
+        assertThatThrownBy(() -> productService.search(ProductSearchCriteria.of(
+                        null, null, null, null, 0, 10, List.of("version"))))
+                .isInstanceOf(InvalidSortException.class)
+                .hasMessageContaining("version");
+        verify(productRepository, never()).findAll(any(Specification.class), any(Pageable.class));
+    }
+
+    @Test
+    void searchCriteriaRejectsInvalidPriceRangeAndOversizedSearch() {
+        assertThatThrownBy(() -> ProductSearchCriteria.of(
+                        null, new BigDecimal("20.00"), new BigDecimal("10.00"), null, 0, 10, null))
+                .isInstanceOf(InvalidProductQueryException.class)
+                .hasMessageContaining("minPrice");
+
+        assertThatThrownBy(() -> ProductSearchCriteria.of(
+                        null, new BigDecimal("-1"), null, null, 0, 10, null))
+                .isInstanceOf(InvalidProductQueryException.class)
+                .hasMessageContaining("minPrice");
+
+        assertThatThrownBy(() -> ProductSearchCriteria.of(
+                        null, null, null, "x".repeat(ProductSearchCriteria.MAX_SEARCH_LENGTH + 1), 0, 10, null))
+                .isInstanceOf(InvalidProductQueryException.class)
+                .hasMessageContaining("search");
     }
 
     @Test

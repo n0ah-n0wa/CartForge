@@ -41,6 +41,8 @@ spring:
   data:
     redis:
       url: ${REDIS_URL}
+      timeout: 250ms
+      connect-timeout: 250ms
       repositories:
         enabled: false
   cache:

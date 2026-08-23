@@ -96,7 +96,136 @@ class ProductApiIntegrationTest {
                 .andExpect(jsonPath("$.content[0].sku").value("KB-001"))
                 .andExpect(jsonPath("$.content[0].purchasable").value(true))
                 .andExpect(jsonPath("$.page").value(0))
-                .andExpect(jsonPath("$.totalElements").value(1));
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1));
+    }
+
+    @Test
+    void publicListingSupportsPaginationAndAllowlistedSorting() throws Exception {
+        productRepository.saveAndFlush(pricedProduct("P-HIGH", "Zebra", "zebra", "30.00"));
+        productRepository.saveAndFlush(pricedProduct("P-LOW", "Alpha", "alpha", "10.00"));
+        productRepository.saveAndFlush(pricedProduct("P-MID", "Middle", "middle", "20.00"));
+
+        mockMvc.perform(get("/api/v1/products")
+                        .param("page", "0")
+                        .param("size", "2")
+                        .param("sort", "price,asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].sku").value("P-LOW"))
+                .andExpect(jsonPath("$.content[1].sku").value("P-MID"));
+
+        mockMvc.perform(get("/api/v1/products")
+                        .param("page", "1")
+                        .param("size", "2")
+                        .param("sort", "price,asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].sku").value("P-HIGH"));
+    }
+
+    @Test
+    void publicListingCapsPageSizeAndRejectsInvalidSort() throws Exception {
+        productRepository.saveAndFlush(activeProduct("KB-001", "Keyboard", "keyboard"));
+
+        mockMvc.perform(get("/api/v1/products").param("size", "1000"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.size").value(100));
+
+        mockMvc.perform(get("/api/v1/products").param("sort", "password,asc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_SORT"));
+
+        mockMvc.perform(get("/api/v1/products").param("sort", "price,sideways"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_SORT"));
+
+        mockMvc.perform(get("/api/v1/products").param("page", "abc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void publicListingSupportsCombinedFiltersSearchAndSorting() throws Exception {
+        Category games = categoryRepository.saveAndFlush(Category.create("Games", "games", null));
+        productRepository.saveAndFlush(describedProduct(
+                "A-001", "Zebra Laptop", "zebra", "Portable computer", "30.00", books));
+        productRepository.saveAndFlush(describedProduct(
+                "B-001", "Alpha Mouse", "alpha", "Pointing device", "10.00", books));
+        productRepository.saveAndFlush(describedProduct(
+                "C-001", "Middle Pad", "middle", "Desk accessory", "20.00", books));
+        productRepository.saveAndFlush(describedProduct(
+                "G-001", "Laptop Game", "laptop-game", "Console title", "25.00", games));
+        Product inactive = describedProduct(
+                "X-001", "Laptop Hidden", "laptop-hidden", "Should not appear", "15.00", books);
+        inactive.deactivate();
+        productRepository.saveAndFlush(inactive);
+
+        mockMvc.perform(get("/api/v1/products")
+                        .param("category", "books")
+                        .param("minPrice", "15")
+                        .param("maxPrice", "30")
+                        .param("search", "laptop")
+                        .param("sort", "price,asc")
+                        .param("page", "0")
+                        .param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].sku").value("A-001"))
+                .andExpect(jsonPath("$.content[0].category.slug").value("books"));
+
+        mockMvc.perform(get("/api/v1/products")
+                        .param("category", "books")
+                        .param("minPrice", "10")
+                        .param("maxPrice", "25")
+                        .param("sort", "price,desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].sku").value("C-001"))
+                .andExpect(jsonPath("$.content[1].sku").value("B-001"));
+
+        mockMvc.perform(get("/api/v1/products").param("search", "MOUSE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].sku").value("B-001"));
+
+        mockMvc.perform(get("/api/v1/products").param("category", "missing-category"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.content").isEmpty());
+    }
+
+    @Test
+    void publicListingRejectsInvalidFilterParameters() throws Exception {
+        productRepository.saveAndFlush(activeProduct("KB-001", "Keyboard", "keyboard"));
+
+        mockMvc.perform(get("/api/v1/products").param("minPrice", "-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        mockMvc.perform(get("/api/v1/products")
+                        .param("minPrice", "50")
+                        .param("maxPrice", "10"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        mockMvc.perform(get("/api/v1/products").param("maxPrice", "abc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        mockMvc.perform(get("/api/v1/products").param("search", "x".repeat(101)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        mockMvc.perform(get("/api/v1/products").param("size", "1000"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.size").value(100));
     }
 
     @Test
@@ -391,6 +520,15 @@ class ProductApiIntegrationTest {
 
     private Product activeProduct(String sku, String name, String slug) {
         return Product.create(sku, name, slug, null, new BigDecimal("19.99"), CurrencyCode.EUR, 3, books);
+    }
+
+    private Product pricedProduct(String sku, String name, String slug, String price) {
+        return Product.create(sku, name, slug, null, new BigDecimal(price), CurrencyCode.EUR, 3, books);
+    }
+
+    private Product describedProduct(
+            String sku, String name, String slug, String description, String price, Category category) {
+        return Product.create(sku, name, slug, description, new BigDecimal(price), CurrencyCode.EUR, 3, category);
     }
 
     private static String createBody(Long categoryId) {

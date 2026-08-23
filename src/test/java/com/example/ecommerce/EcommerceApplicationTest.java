@@ -2,6 +2,7 @@ package com.example.ecommerce;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.ecommerce.common.cache.CatalogCacheErrorHandler;
 import com.example.ecommerce.common.config.ApplicationProperties;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -15,7 +16,6 @@ import org.springframework.boot.actuate.health.HealthContributorRegistry;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.cache.interceptor.CacheInterceptor;
-import org.springframework.cache.interceptor.LoggingCacheErrorHandler;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -116,14 +116,14 @@ class EcommerceApplicationTest {
     void flywayAppliesTheInfrastructureBaseline() {
         assertThat(environment.getProperty("spring.flyway.enabled")).isEqualTo("true");
         assertThat(flyway.info().current()).isNotNull();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
-        assertThat(flyway.info().current().getDescription()).isEqualTo("create orders");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
+        assertThat(flyway.info().current().getDescription()).isEqualTo("categories active index");
         assertThat(flyway.info().current().getState()).isEqualTo(MigrationState.SUCCESS);
 
         List<String> applied = jdbcTemplate.queryForList(
                 "select version from flyway_schema_history where success order by installed_rank",
                 String.class);
-        assertThat(applied).containsExactly("1", "2", "3", "4", "5", "6");
+        assertThat(applied).containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
         assertThat(jdbcTemplate.queryForObject(
                         "select obj_description('public'::regnamespace, 'pg_namespace')",
                         String.class))
@@ -145,7 +145,7 @@ class EcommerceApplicationTest {
 
     @Test
     void cacheFailuresAreLoggedInsteadOfFailingRequests() {
-        assertThat(cacheInterceptor.getErrorHandler()).isInstanceOf(LoggingCacheErrorHandler.class);
+        assertThat(cacheInterceptor.getErrorHandler()).isInstanceOf(CatalogCacheErrorHandler.class);
     }
 
     @Test
