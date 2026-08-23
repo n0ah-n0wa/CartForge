@@ -50,6 +50,9 @@ class CommittedConfigurationSafetyTest {
         assertThat(shared).contains("locations: classpath:db/migration");
         assertThat(shared).contains("CamelCaseToUnderscoresNamingStrategy");
         assertThat(shared).contains("time_zone: UTC");
+        assertThat(shared)
+                .as("Hibernate selects the PostgreSQL dialect from the connection; setting it is deprecated")
+                .doesNotContain("database-platform");
     }
 
     @Test
@@ -68,7 +71,13 @@ class CommittedConfigurationSafetyTest {
                         .matches(PersistenceConventions.MIGRATION_FILENAME_PATTERN));
         assertThat(files)
                 .extracting(path -> path.getFileName().toString())
-                .contains("V1__schema_baseline.sql");
+                .contains(
+                        "V1__schema_baseline.sql",
+                        "V2__create_users.sql",
+                        "V3__create_categories.sql",
+                        "V4__create_products.sql",
+                        "V5__create_carts.sql",
+                        "V6__create_orders.sql");
     }
 
     @Test

@@ -1,6 +1,6 @@
 # Database
 
-**Status:** conventions established. Flyway baseline `V1__schema_baseline.sql` is applied. Domain tables and entities are not implemented yet.
+**Status:** conventions established. Every table in the specified domain model exists: `V1__schema_baseline.sql`, `V2__create_users.sql`, `V3__create_categories.sql`, `V4__create_products.sql`, `V5__create_carts.sql`, and `V6__create_orders.sql`. Checkout, the order-number generator, and the idempotency table are not implemented yet.
 
 PostgreSQL is the authoritative persistence layer. Redis must not be treated as durable business state. See [ADR 0002](adr/0002-postgresql-source-of-truth.md) and [ADR 0003](adr/0003-redis-as-cache.md).
 
@@ -92,7 +92,7 @@ See [ADR 0004](adr/0004-optimistic-locking.md).
 - Never store money as `float`, `double`, `REAL`, or `DOUBLE PRECISION`.
 - Amount columns: `NUMERIC(19, 2) NOT NULL` (`PersistenceConventions.MONEY_PRECISION` / `MONEY_SCALE`).
 - Java amounts: `BigDecimal` with `@Column(precision = 19, scale = 2)`.
-- Currency: `CHAR(3) NOT NULL` storing an ISO 4217 code. Java: `CurrencyCode`. Default: `EUR`.
+- Currency: `VARCHAR(3) NOT NULL` storing an ISO 4217 code, guarded by a `^[A-Z]{3}$` check. Java: `CurrencyCode` (`@Enumerated(STRING)`). Default: `EUR`. `VARCHAR` rather than `CHAR` so Hibernate's `validate` type check matches a `String`-backed enum without a JDBC type override.
 - Price, total, unit price, and line total follow this pair of rules. Order items snapshot `unit_price` as `NUMERIC(19, 2)`.
 - Monetary amounts that must not be negative also get a check constraint (`ck_<table>_<column>_non_negative`).
 
@@ -163,53 +163,63 @@ Field lists are the specified columns, not an implemented schema. Apply the conv
 
 ### User — `users` — `VersionedEntity`
 
-`id`, `email`, `passwordHash`, `firstName`, `lastName`, `role`, `enabled`, `createdAt`, `updatedAt`, `version`
+Implemented. `id`, `email`, `passwordHash`, `firstName`, `lastName`, `role`, `enabled`, `createdAt`, `updatedAt`, `version`
 
-- Email is unique and compared case-insensitively (`uq_users_email_lower`).
-- Password is stored only as a hash (BCrypt or Argon2).
-- Role is an enum: `CUSTOMER`, `ADMIN`.
+- Email is unique and compared case-insensitively (`uq_users_email_lower`). Stored lowercase.
+- Password is stored only as `password_hash`. The entity never accepts plaintext.
+- Role is `UserRole`: `CUSTOMER`, `ADMIN`, enforced by `ck_users_role`.
 - Registration default role is `CUSTOMER`. Users are enabled by default.
+- Safe API shape is `UserResponse` (no password hash). Authentication is not implemented yet.
 
 ### Category — `categories` — `BaseEntity`
 
-`id`, `name`, `slug`, `description`, `active`, `createdAt`, `updatedAt`
+Implemented. `id`, `name`, `slug`, `description`, `active`, `createdAt`, `updatedAt`
 
-- Name and slug are unique. Slug is URL-safe.
-- Inactive categories are omitted from the default public catalog.
-- Deleting a category must not silently delete products. Deletion is rejected when products exist, or requires explicit reassignment.
+- Name and slug are unique (`uq_categories_name`, `uq_categories_slug`). Slug is URL-safe kebab-case (`ck_categories_slug_format`).
+- `description` is optional (`NULL` when blank).
+- Inactive categories are omitted from the default public catalog (`findByActiveTrueOrderByNameAsc`).
+- Deleting a category must not silently delete products. `CategoryService.delete` is rejected when `CategoryProductReference` reports products. `reassignAndDelete` moves products first, then deletes. The adapter is `product.service.ProductCategoryReference`; `fk_products_categories ON DELETE RESTRICT` is the database-level guard.
 - When historical references exist, deactivation (`active = false`) is preferred over physical delete.
 
 ### Product — `products` — `VersionedEntity`
 
-`id`, `sku`, `name`, `slug`, `description`, `price`, `currency`, `stockQuantity`, `categoryId`, `active`, `createdAt`, `updatedAt`, `version`
+Implemented. `id`, `sku`, `name`, `slug`, `description`, `price`, `currency`, `stockQuantity`, `categoryId`, `active`, `createdAt`, `updatedAt`, `version`
 
-- SKU and slug are unique.
-- Price is non-negative `NUMERIC(19, 2)` / `BigDecimal`. Currency is explicit; default is EUR.
-- `stock_quantity` must never be negative (`ck_products_stock_quantity_non_negative`).
+- SKU and slug are unique (`uq_products_sku`, `uq_products_slug`). SKU is stored upper-case; slug is lower-case kebab-case (`ck_products_slug_format`).
+- Price is non-negative `NUMERIC(19, 2)` / `BigDecimal` (`ck_products_price_non_negative`). The entity rejects a scale the column cannot hold instead of letting PostgreSQL round it. Currency is explicit; default is EUR.
+- `stock_quantity` must never be negative (`ck_products_stock_quantity_non_negative`). `Product.decreaseStock` refuses to go below zero; the check constraint is the last guard.
 - A product belongs to a category (`fk_products_categories`, `ON DELETE RESTRICT`).
-- Inactive products and zero-stock products are not purchasable.
+- Inactive products and zero-stock products are not purchasable (`Product.isPurchasable`).
+- Updates use optimistic locking; a stale write raises `OptimisticLockingFailureException` and maps to HTTP 409 once controllers exist.
+- The `category` association is `@ManyToOne(fetch = LAZY)`. Finders whose callers render the category (`findWithCategoryBySlug`, `findByActiveTrue`) declare `@EntityGraph(attributePaths = "category")` so a catalog page stays one query.
+- Indexes: `ix_products_category_id`, `ix_products_active`, `ix_products_price`, `ix_products_name`. SKU and slug are covered by their unique constraints.
 
 ### Cart and CartItem — `carts`, `cart_items` — `BaseEntity`
 
-Cart: `id`, `userId`, `createdAt`, `updatedAt`
-
-CartItem: `id`, `cartId`, `productId`, `quantity`, `createdAt`, `updatedAt`
+Implemented. Cart: `id`, `userId`, `createdAt`, `updatedAt`. CartItem: `id`, `cartId`, `productId`, `quantity`, `createdAt`, `updatedAt`.
 
 - Each customer has at most one cart (`uq_carts_user_id`).
-- Quantity must be greater than zero.
-- The same product must not appear twice in one cart (`uq_cart_items_cart_id_product_id`).
+- Quantity must be greater than zero (`ck_cart_items_quantity_positive`). `Cart.addOrIncrease` and `CartItem.changeQuantity` reject non-positive values first.
+- The same product must not appear twice in one cart (`uq_cart_items_cart_id_product_id`). `Cart.addOrIncrease` increases the existing line instead of adding a second one.
 - Cart contents do not reserve inventory. Stock is checked again at checkout.
-- `cart_items` may use `ON DELETE CASCADE` from `carts`. `product_id` stays `RESTRICT`.
+- `Cart` is the aggregate root: `@OneToMany(cascade = ALL, orphanRemoval = true)` over its lines, matching `fk_cart_items_carts ON DELETE CASCADE`. Removing a line or clearing the cart deletes the rows.
+- Nothing cascades outward from a cart. `fk_cart_items_products` and `fk_carts_users` are `ON DELETE RESTRICT`, so deleting a cart never touches products or users, and a product or customer cannot be deleted while referenced.
+- `Cart.user`, `CartItem.cart`, and `CartItem.product` are all lazy. `findWithItemsByUserId` declares `@EntityGraph(attributePaths = {"items", "items.product"})` so rendering a cart is one query.
+- Indexes: `ix_cart_items_product_id`. The spec's `cart_items.cart_id` index is served by the leading column of `uq_cart_items_cart_id_product_id`, and `carts.user_id` by `uq_carts_user_id`.
 
 ### Order and OrderItem — `orders`, `order_items` — Order is `VersionedEntity`
 
-Order: `id`, `orderNumber`, `userId`, `status`, `totalAmount`, `currency`, `shippingAddress`, `createdAt`, `updatedAt`, `version`
+Implemented. Order: `id`, `orderNumber`, `userId`, `status`, `totalAmount`, `currency`, `shippingAddress`, `createdAt`, `updatedAt`, `version`. OrderItem: `id`, `orderId`, `productId`, `productName`, `sku`, `unitPrice`, `quantity`, `lineTotal`.
 
-OrderItem: `id`, `orderId`, `productId`, `productName`, `sku`, `unitPrice`, `quantity`, `lineTotal`
-
-- `order_number` is unique and human-readable (example: `ORD-2026-000001`). It must not be only the internal id.
-- Generation must remain unique with multiple replicas. The planned approach is a PostgreSQL sequence allocated inside the checkout transaction.
-- Order items snapshot name, SKU, and unit price.
+- `order_number` is unique (`uq_orders_order_number`) and human-readable (example: `ORD-2026-000001`). It must not be only the internal id. The column carries a not-blank check but no format check, so the generator owns the format.
+- Generation must remain unique with multiple replicas. The planned approach is a PostgreSQL sequence allocated inside the checkout transaction. Not implemented yet.
+- `status` is `OrderStatus`, constrained by `ck_orders_status`. The lifecycle in §14 lives on the enum (`canTransitionTo`, `isCancellable`); `Order.transitionTo` raises `OrderStatusTransitionException` on an invalid move, which maps to HTTP 409.
+- `total_amount` is `NUMERIC(19, 2)` and non-negative. `Order` recomputes it from its line totals whenever a line is added, so the stored total cannot drift from the lines.
+- Order items snapshot `product_name`, `sku`, and `unit_price` at checkout and are never refreshed from the catalog, so renaming, repricing, or deactivating a product leaves historical orders correct. `ck_order_items_line_total` enforces `line_total = unit_price * quantity` in the database.
+- `OrderItem` extends `BaseEntity`, so it also carries `created_at` / `updated_at`. §13.2 does not list them; they are kept for convention consistency, and the rows are write-once.
+- `Order` is the aggregate root over its lines (`cascade = ALL`, `orphanRemoval`, matching `fk_order_items_orders ON DELETE CASCADE`). `fk_orders_users` and `fk_order_items_products` are `ON DELETE RESTRICT`, so a customer or product referenced by an order cannot be deleted — §70 requires deactivation instead.
+- `Order.user`, `Order.items`, `OrderItem.order`, and `OrderItem.product` are lazy. `findWithItemsByOrderNumber` declares an entity graph over `items`; paged finders deliberately do not, because a collection graph plus `Pageable` paginates in memory.
+- Indexes: `ix_orders_user_id`, `ix_orders_status`, `ix_order_items_order_id`, `ix_order_items_product_id`. PostgreSQL does not index a foreign key automatically, and `order_items.product_id` is both the `RESTRICT` parent check and the "has this product ever been ordered?" lookup behind soft deactivation.
 
 ## Relationships and foreign keys
 

@@ -3,7 +3,6 @@ package com.example.ecommerce.common.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.example.ecommerce.EcommerceApplication;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -11,6 +10,9 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.ConfigurableApplicationContext;
 
 class ProdConfigurationTest {
@@ -89,7 +91,7 @@ class ProdConfigurationTest {
     }
 
     private static ConfigurableApplicationContext runProd(Map<String, Object> environment) {
-        SpringApplication application = new SpringApplication(EcommerceApplication.class);
+        SpringApplication application = new SpringApplication(IsolatedProdApplication.class);
         application.setWebApplicationType(WebApplicationType.NONE);
         application.setAdditionalProfiles("prod");
 
@@ -112,5 +114,11 @@ class ProdConfigurationTest {
         environment.put("CORS_ORIGINS", "https://shop.example.com");
         environment.put("LOGGING_LEVEL_ROOT", "WARN");
         return environment;
+    }
+
+    @SpringBootApplication(scanBasePackages = "com.example.ecommerce.common")
+    @EnableCaching
+    @EnableConfigurationProperties(ApplicationProperties.class)
+    static class IsolatedProdApplication {
     }
 }

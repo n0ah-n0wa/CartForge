@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.example.ecommerce.common.config.ApplicationProperties;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.List;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationState;
@@ -115,14 +116,14 @@ class EcommerceApplicationTest {
     void flywayAppliesTheInfrastructureBaseline() {
         assertThat(environment.getProperty("spring.flyway.enabled")).isEqualTo("true");
         assertThat(flyway.info().current()).isNotNull();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
-        assertThat(flyway.info().current().getDescription()).isEqualTo("schema baseline");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
+        assertThat(flyway.info().current().getDescription()).isEqualTo("create orders");
         assertThat(flyway.info().current().getState()).isEqualTo(MigrationState.SUCCESS);
 
-        Integer applied = jdbcTemplate.queryForObject(
-                "select count(*) from flyway_schema_history where version = '1' and success",
-                Integer.class);
-        assertThat(applied).isEqualTo(1);
+        List<String> applied = jdbcTemplate.queryForList(
+                "select version from flyway_schema_history where success order by installed_rank",
+                String.class);
+        assertThat(applied).containsExactly("1", "2", "3", "4", "5", "6");
         assertThat(jdbcTemplate.queryForObject(
                         "select obj_description('public'::regnamespace, 'pg_namespace')",
                         String.class))

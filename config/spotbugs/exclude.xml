@@ -3,4 +3,14 @@
     <Match>
         <Class name="~.*\.package-info"/>
     </Match>
+    <!--
+        A JPA association getter returns the associated entity by reference on
+        purpose; copying it would detach it from the persistence context. The
+        rule still applies everywhere outside the entity packages, where it has
+        already caught real mutable-state leaks.
+    -->
+    <Match>
+        <Package name="~com\.example\.ecommerce\..*\.entity"/>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
 </FindBugsFilter>
