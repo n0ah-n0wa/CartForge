@@ -48,11 +48,32 @@ class ApiBoundaryTest {
         }
     }
 
+    /**
+     * Section 93: ownership comes from the security context. An inbound payload
+     * that carried an owner id would invite a handler to trust it.
+     */
+    @Test
+    void noInboundPayloadAcceptsAnOwnerIdentifier() throws Exception {
+        List<Class<?>> inbound = dtoClasses().stream()
+                .filter(dto -> dto.getSimpleName().endsWith("Command") || dto.getSimpleName().endsWith("Request"))
+                .toList();
+        assertThat(inbound).isNotEmpty();
+
+        for (Class<?> dto : inbound) {
+            for (RecordComponent component : dto.getRecordComponents()) {
+                assertThat(component.getName())
+                        .as("%s must not let the caller nominate an owner", dto.getSimpleName())
+                        .isNotIn("userId", "ownerId", "customerId");
+            }
+        }
+    }
+
     @Test
     void everyFeatureDtoPackageIsCovered() throws Exception {
         assertThat(dtoClasses())
                 .extracting(Class::getPackageName)
                 .contains(
+                        "com.example.ecommerce.auth.dto",
                         "com.example.ecommerce.user.dto",
                         "com.example.ecommerce.category.dto",
                         "com.example.ecommerce.product.dto",

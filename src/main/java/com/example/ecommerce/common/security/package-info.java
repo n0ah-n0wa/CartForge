@@ -1,4 +1,4 @@
 /**
- * Security filter chain and later JWT integration.
+ * Security filter chain, JWT validation, and reusable authorization rules.
  */
 package com.example.ecommerce.common.security;
