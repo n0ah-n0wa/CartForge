@@ -6,6 +6,7 @@ import java.time.Instant;
 
 /**
  * Safe catalog representation. The entity is never returned from the API.
+ * {@code version} is included so clients can perform optimistic updates.
  */
 public record ProductResponse(
         Long id,
@@ -18,6 +19,7 @@ public record ProductResponse(
         int stockQuantity,
         boolean active,
         boolean purchasable,
+        Long version,
         ProductCategoryResponse category,
         Instant createdAt,
         Instant updatedAt

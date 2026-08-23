@@ -13,4 +13,9 @@
         <Package name="~com\.example\.ecommerce\..*\.entity"/>
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
     </Match>
+    <!-- Spring controllers receive immutable service beans by constructor injection. -->
+    <Match>
+        <Package name="~com\.example\.ecommerce\..*\.controller"/>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
 </FindBugsFilter>

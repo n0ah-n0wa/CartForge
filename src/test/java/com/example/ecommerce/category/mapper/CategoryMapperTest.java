@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ecommerce.category.dto.CategoryResponse;
 import com.example.ecommerce.category.dto.CreateCategoryCommand;
+import com.example.ecommerce.category.dto.PatchCategoryCommand;
 import com.example.ecommerce.category.dto.UpdateCategoryCommand;
 import com.example.ecommerce.category.entity.Category;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,18 @@ class CategoryMapperTest {
         assertThat(category.getSlug()).isEqualTo("electronics");
         assertThat(category.getDescription()).isNull();
         assertThat(category.isActive()).isFalse();
+    }
+
+    @Test
+    void appliesPatchToSelectedFields() {
+        Category category = Category.create("Books", "books", "Printed titles");
+
+        mapper.applyPatch(new PatchCategoryCommand("Media", null, null, null), category);
+
+        assertThat(category.getName()).isEqualTo("Media");
+        assertThat(category.getSlug()).isEqualTo("books");
+        assertThat(category.getDescription()).isEqualTo("Printed titles");
+        assertThat(category.isActive()).isTrue();
     }
 
     @Test

@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 
 public record UpdateProductCommand(
+        @NotNull Long version,
         @NotBlank @Size(max = 200) String name,
         @NotBlank
         @Size(max = 220)
@@ -17,7 +18,7 @@ public record UpdateProductCommand(
         String slug,
         @Size(max = 4000) String description,
         @NotNull @PositiveOrZero @Digits(integer = 17, fraction = 2) BigDecimal price,
-        CurrencyCode currency,
+        @NotNull CurrencyCode currency,
         @PositiveOrZero int stockQuantity,
         @NotNull Long categoryId,
         @NotNull Boolean active

@@ -22,9 +22,16 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     boolean existsBySlug(String slug);
 
+    boolean existsBySkuAndIdNot(String sku, Long id);
+
+    boolean existsBySlugAndIdNot(String slug, Long id);
+
     long countByCategoryId(Long categoryId);
 
     List<Product> findByCategoryId(Long categoryId);
+
+    @EntityGraph(attributePaths = "category")
+    Optional<Product> findWithCategoryById(Long id);
 
     @EntityGraph(attributePaths = "category")
     Optional<Product> findWithCategoryBySlug(String slug);

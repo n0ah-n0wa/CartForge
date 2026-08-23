@@ -133,8 +133,8 @@ class JwtAuthenticationIntegrationTest {
 
     @Test
     void leavesThePublicCatalogAndAuthEndpointsOpen() throws Exception {
-        mockMvc.perform(get("/api/v1/products")).andExpect(status().isNotFound());
-        mockMvc.perform(get("/api/v1/categories")).andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/products")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/categories")).andExpect(status().isOk());
     }
 
     private String customerToken() {

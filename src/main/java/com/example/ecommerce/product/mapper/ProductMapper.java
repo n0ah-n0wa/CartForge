@@ -2,6 +2,7 @@ package com.example.ecommerce.product.mapper;
 
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.product.dto.CreateProductCommand;
+import com.example.ecommerce.product.dto.PatchProductCommand;
 import com.example.ecommerce.product.dto.ProductCategoryResponse;
 import com.example.ecommerce.product.dto.ProductResponse;
 import com.example.ecommerce.product.dto.UpdateProductCommand;
@@ -36,6 +37,35 @@ public class ProductMapper {
         }
     }
 
+    public void applyPatch(PatchProductCommand command, Product product, Category categoryOrNull) {
+        if (command.name() != null || command.slug() != null) {
+            product.rename(
+                    command.name() != null ? command.name() : product.getName(),
+                    command.slug() != null ? command.slug() : product.getSlug());
+        }
+        if (command.description() != null) {
+            product.changeDescription(command.description());
+        }
+        if (command.price() != null || command.currency() != null) {
+            product.changePrice(
+                    command.price() != null ? command.price() : product.getPrice(),
+                    command.currency() != null ? command.currency() : product.getCurrency());
+        }
+        if (command.stockQuantity() != null) {
+            product.changeStock(command.stockQuantity());
+        }
+        if (categoryOrNull != null) {
+            product.reassignCategory(categoryOrNull);
+        }
+        if (command.active() != null) {
+            if (command.active()) {
+                product.activate();
+            } else {
+                product.deactivate();
+            }
+        }
+    }
+
     /**
      * Reads the category association, so the product must be loaded with the
      * category fetched to avoid a per-product select.
@@ -53,6 +83,7 @@ public class ProductMapper {
                 product.getStockQuantity(),
                 product.isActive(),
                 product.isPurchasable(),
+                product.getVersion(),
                 new ProductCategoryResponse(category.getId(), category.getName(), category.getSlug()),
                 product.getCreatedAt(),
                 product.getUpdatedAt());

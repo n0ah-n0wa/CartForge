@@ -33,7 +33,10 @@ public class SecurityConfig {
      * session is created and nothing is stored server-side.
      */
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationConverter converter)
+    SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            JwtAuthenticationConverter converter,
+            SecurityProblemHandlers problemHandlers)
             throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -43,8 +46,8 @@ public class SecurityConfig {
                 .formLogin(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(exceptions -> exceptions
-                        .authenticationEntryPoint(SecurityProblemHandlers.unauthorized())
-                        .accessDeniedHandler(SecurityProblemHandlers.forbidden()))
+                        .authenticationEntryPoint(problemHandlers.unauthorized())
+                        .accessDeniedHandler(problemHandlers.forbidden()))
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers(EndpointRequest.to(HealthEndpoint.class)).permitAll();
                     if (environment.matchesProfiles("dev")) {
@@ -86,8 +89,8 @@ public class SecurityConfig {
                     auth.anyRequest().authenticated();
                 })
                 .oauth2ResourceServer(resourceServer -> resourceServer
-                        .authenticationEntryPoint(SecurityProblemHandlers.unauthorized())
-                        .accessDeniedHandler(SecurityProblemHandlers.forbidden())
+                        .authenticationEntryPoint(problemHandlers.unauthorized())
+                        .accessDeniedHandler(problemHandlers.forbidden())
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(converter)));
         return http.build();
     }

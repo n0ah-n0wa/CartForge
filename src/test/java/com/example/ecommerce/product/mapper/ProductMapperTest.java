@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.common.persistence.CurrencyCode;
 import com.example.ecommerce.product.dto.CreateProductCommand;
+import com.example.ecommerce.product.dto.PatchProductCommand;
 import com.example.ecommerce.product.dto.ProductResponse;
 import com.example.ecommerce.product.dto.UpdateProductCommand;
 import com.example.ecommerce.product.entity.Product;
@@ -50,6 +51,7 @@ class ProductMapperTest {
 
         mapper.apply(
                 new UpdateProductCommand(
+                        0L,
                         "Keyboard Pro",
                         "keyboard-pro",
                         null,
@@ -72,7 +74,27 @@ class ProductMapperTest {
     }
 
     @Test
-    void mapsEntityToResponseWithCategorySummary() {
+    void appliesPatchToSelectedFieldsOnly() {
+        Category books = Category.create("Books", "books", null);
+        Product product = mapper.toEntity(
+                new CreateProductCommand(
+                        "KB-001", "Keyboard", "keyboard", "Mechanical",
+                        new BigDecimal("49.50"), null, 7, 1L),
+                books);
+
+        mapper.applyPatch(
+                new PatchProductCommand(0L, null, null, null, null, null, null, null, false),
+                product,
+                null);
+
+        assertThat(product.getName()).isEqualTo("Keyboard");
+        assertThat(product.getStockQuantity()).isEqualTo(7);
+        assertThat(product.isActive()).isFalse();
+        assertThat(product.isPurchasable()).isFalse();
+    }
+
+    @Test
+    void mapsEntityToResponseWithCategorySummaryAndVersion() {
         Category category = Category.create("Books", "books", null);
         Product product = mapper.toEntity(
                 new CreateProductCommand(
@@ -86,6 +108,7 @@ class ProductMapperTest {
         assertThat(response.price()).isEqualByComparingTo("49.50");
         assertThat(response.currency()).isEqualTo(CurrencyCode.EUR);
         assertThat(response.purchasable()).isTrue();
+        assertThat(response.version()).isNull();
         assertThat(response.category().name()).isEqualTo("Books");
         assertThat(response.category().slug()).isEqualTo("books");
     }

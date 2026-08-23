@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.ecommerce.auth.dto.AuthenticatedUser;
@@ -66,9 +67,9 @@ class AuthorizationBoundaryIntegrationTest {
 
     @Test
     void theCatalogIsReadableWithoutAuthentication() throws Exception {
-        mockMvc.perform(get("/api/v1/products")).andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/products")).andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/products/1")).andExpect(status().isNotFound());
-        mockMvc.perform(get("/api/v1/categories")).andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/categories")).andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/categories/1")).andExpect(status().isNotFound());
     }
 
@@ -97,7 +98,7 @@ class AuthorizationBoundaryIntegrationTest {
     @Test
     void anAdministratorMayWriteToTheCatalog() throws Exception {
         mockMvc.perform(post("/api/v1/products").header(HttpHeaders.AUTHORIZATION, admin()))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isBadRequest());
         mockMvc.perform(delete("/api/v1/categories/1").header(HttpHeaders.AUTHORIZATION, admin()))
                 .andExpect(status().isNotFound());
     }
@@ -143,6 +144,7 @@ class AuthorizationBoundaryIntegrationTest {
         mockMvc.perform(get("/api/v1/orders"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer"))
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"))
                 .andExpect(header().string("X-Frame-Options", "DENY"))
                 .andExpect(header().exists("Cache-Control"));

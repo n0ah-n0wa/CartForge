@@ -1,17 +1,21 @@
 package com.example.ecommerce.category.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.example.ecommerce.category.dto.CreateCategoryCommand;
+import com.example.ecommerce.category.dto.PatchCategoryCommand;
+import com.example.ecommerce.category.dto.UpdateCategoryCommand;
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.category.mapper.CategoryMapper;
 import com.example.ecommerce.category.repository.CategoryRepository;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -21,14 +25,69 @@ class CategoryServiceTest {
     @Mock
     private CategoryRepository categoryRepository;
 
-    @Mock
-    private CategoryMapper categoryMapper;
+    private final CategoryMapper categoryMapper = new CategoryMapper();
 
     @Mock
     private CategoryProductReference productReference;
 
-    @InjectMocks
     private CategoryService categoryService;
+
+    @BeforeEach
+    void wireMapper() {
+        categoryService = new CategoryService(categoryRepository, categoryMapper, productReference);
+    }
+
+    @Test
+    void createRejectsDuplicateName() {
+        when(categoryRepository.existsByName("Books")).thenReturn(true);
+
+        assertThatThrownBy(() -> categoryService.create(new CreateCategoryCommand("Books", "paper", null)))
+                .isInstanceOf(DuplicateCategoryException.class);
+        verify(categoryRepository, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void updateRejectsDuplicateSlugForAnotherCategory() {
+        Category category = Category.create("Books", "books", null);
+        when(categoryRepository.findById(8L)).thenReturn(java.util.Optional.of(category));
+        when(categoryRepository.existsBySlugAndIdNot("media", 8L)).thenReturn(true);
+
+        assertThatThrownBy(() -> categoryService.update(
+                        8L, new UpdateCategoryCommand("Books", "media", null, true)))
+                .isInstanceOf(DuplicateCategoryException.class);
+    }
+
+    @Test
+    void patchUpdatesOnlyProvidedFields() {
+        Category category = Category.create("Books", "books", "Printed");
+        when(categoryRepository.findById(8L)).thenReturn(java.util.Optional.of(category));
+        when(categoryRepository.saveAndFlush(category)).thenReturn(category);
+
+        Category patched = categoryService.patch(8L, new PatchCategoryCommand(null, null, "Updated", false));
+
+        assertThat(patched.isActive()).isFalse();
+        assertThat(patched.getDescription()).isEqualTo("Updated");
+        assertThat(patched.getName()).isEqualTo("Books");
+    }
+
+    @Test
+    void listActiveDelegatesToRepository() {
+        Category books = Category.create("Books", "books", null);
+        when(categoryRepository.findByActiveTrueOrderByNameAsc()).thenReturn(java.util.List.of(books));
+
+        assertThat(categoryService.listActive()).containsExactly(books);
+    }
+
+    @Test
+    void getByIdHidesInactiveCategoriesFromPublicCallers() {
+        Category hidden = Category.create("Archived", "archived", null);
+        hidden.deactivate();
+        when(categoryRepository.findById(8L)).thenReturn(java.util.Optional.of(hidden));
+
+        assertThatThrownBy(() -> categoryService.getById(8L, false))
+                .isInstanceOf(CategoryNotFoundException.class);
+        assertThat(categoryService.getById(8L, true)).isSameAs(hidden);
+    }
 
     @Test
     void deleteIsRejectedWhenProductsExist() {
