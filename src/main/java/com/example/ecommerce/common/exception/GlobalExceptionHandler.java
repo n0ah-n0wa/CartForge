@@ -1,5 +1,10 @@
 package com.example.ecommerce.common.exception;
 
+import com.example.ecommerce.cart.service.CartItemNotFoundException;
+import com.example.ecommerce.cart.service.CartOwnerNotFoundException;
+import com.example.ecommerce.cart.service.InactiveProductForCartException;
+import com.example.ecommerce.cart.service.InsufficientStockException;
+import com.example.ecommerce.cart.service.InvalidCartQuantityException;
 import com.example.ecommerce.category.service.CategoryInUseException;
 import com.example.ecommerce.category.service.CategoryNotFoundException;
 import com.example.ecommerce.category.service.DuplicateCategoryException;
@@ -35,6 +40,37 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ProductNotFoundException.class)
     ResponseEntity<ApiErrorResponse> productNotFound(ProductNotFoundException exception, HttpServletRequest request) {
         return respond(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(CartItemNotFoundException.class)
+    ResponseEntity<ApiErrorResponse> cartItemNotFound(CartItemNotFoundException exception, HttpServletRequest request) {
+        return respond(HttpStatus.NOT_FOUND, "CART_ITEM_NOT_FOUND", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(CartOwnerNotFoundException.class)
+    ResponseEntity<ApiErrorResponse> cartOwnerNotFound(CartOwnerNotFoundException exception, HttpServletRequest request) {
+        return respond(HttpStatus.UNAUTHORIZED, "CART_OWNER_NOT_FOUND", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(InactiveProductForCartException.class)
+    ResponseEntity<ApiErrorResponse> inactiveProductForCart(
+            InactiveProductForCartException exception,
+            HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, "INACTIVE_PRODUCT", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(InsufficientStockException.class)
+    ResponseEntity<ApiErrorResponse> insufficientStock(
+            InsufficientStockException exception,
+            HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, "INSUFFICIENT_STOCK", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(InvalidCartQuantityException.class)
+    ResponseEntity<ApiErrorResponse> invalidCartQuantity(
+            InvalidCartQuantityException exception,
+            HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, "INVALID_CART_QUANTITY", exception.getMessage(), request);
     }
 
     @ExceptionHandler(CategoryInUseException.class)

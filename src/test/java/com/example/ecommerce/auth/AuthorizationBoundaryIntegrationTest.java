@@ -175,7 +175,9 @@ class AuthorizationBoundaryIntegrationTest {
     @Test
     void anAuthenticatedCustomerReachesTheirOwnCartAndOrders() throws Exception {
         mockMvc.perform(get("/api/v1/cart").header(HttpHeaders.AUTHORIZATION, customer()))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isEmpty())
+                .andExpect(jsonPath("$.totalQuantity").value(0));
         mockMvc.perform(get("/api/v1/orders").header(HttpHeaders.AUTHORIZATION, customer()))
                 .andExpect(status().isNotFound());
     }
