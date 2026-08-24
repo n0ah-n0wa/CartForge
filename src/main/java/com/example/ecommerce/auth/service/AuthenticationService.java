@@ -43,7 +43,10 @@ public class AuthenticationService {
      */
     @Transactional(readOnly = true)
     public AccessTokenResponse login(LoginRequest request) {
-        return jwtTokenService.issue(authenticate(request));
+        AuthenticatedUser user = authenticate(request);
+        AccessTokenResponse token = jwtTokenService.issue(user);
+        log.info("event=authentication_succeeded userId={}", user.userId());
+        return token;
     }
 
     /**
@@ -77,7 +80,7 @@ public class AuthenticationService {
      * The password is never written.
      */
     private static void reject(LoginRequest request) {
-        log.info("Authentication failed for email={}", request.email());
+        log.info("event=authentication_failed email={}", request.email());
         throw new InvalidCredentialsException();
     }
 }

@@ -1,7 +1,5 @@
 package com.example.ecommerce.common.security;
 
-import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
-import org.springframework.boot.actuate.health.HealthEndpoint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -49,7 +47,10 @@ public class SecurityConfig {
                         .authenticationEntryPoint(problemHandlers.unauthorized())
                         .accessDeniedHandler(problemHandlers.forbidden()))
                 .authorizeHttpRequests(auth -> {
-                    auth.requestMatchers(EndpointRequest.to(HealthEndpoint.class)).permitAll();
+                    // Only health and prometheus are enabled. Other /actuator
+                    // paths 404 without requiring a JWT (401 would hide that they
+                    // are disabled).
+                    auth.requestMatchers("/actuator/**").permitAll();
                     if (environment.matchesProfiles("dev")) {
                         auth.requestMatchers(
                                         "/v3/api-docs",

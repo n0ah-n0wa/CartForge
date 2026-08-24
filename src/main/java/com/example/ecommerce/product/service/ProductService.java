@@ -15,6 +15,8 @@ import com.example.ecommerce.product.mapper.ProductMapper;
 import com.example.ecommerce.product.repository.ProductRepository;
 import com.example.ecommerce.product.repository.ProductSpecifications;
 import java.util.Locale;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.Caching;
@@ -29,6 +31,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Transactional
 public class ProductService {
+
+    private static final Logger log = LoggerFactory.getLogger(ProductService.class);
 
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
@@ -129,7 +133,9 @@ public class ProductService {
      */
     @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
     public ProductResponse createResponse(CreateProductCommand command) {
-        return productMapper.toResponse(create(command));
+        ProductResponse response = productMapper.toResponse(create(command));
+        log.info("event=admin_product_created productId={} sku={}", response.id(), response.sku());
+        return response;
     }
 
     @Caching(evict = {
@@ -191,7 +197,9 @@ public class ProductService {
         Product product = requireWithCategory(id);
         assertVersion(product, version);
         product.deactivate();
-        return flushProduct(product, product.getSku(), product.getSlug());
+        Product saved = flushProduct(product, product.getSku(), product.getSlug());
+        log.info("event=admin_product_deactivated productId={}", saved.getId());
+        return saved;
     }
 
     @Transactional(readOnly = true)

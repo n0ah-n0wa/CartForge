@@ -13,6 +13,8 @@ import com.example.ecommerce.order.mapper.OrderMapper;
 import com.example.ecommerce.order.repository.OrderRepository;
 import java.util.Comparator;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -27,6 +29,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Transactional
 public class AdminOrderService {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminOrderService.class);
 
     private final OrderRepository orderRepository;
     private final InventoryService inventoryService;
@@ -90,6 +94,7 @@ public class AdminOrderService {
         Order order = orderRepository.findWithItemsByIdForUpdate(orderId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
 
+        OrderStatus previous = order.getStatus();
         order.transitionTo(command.status());
 
         if (order.getStatus() == OrderStatus.CANCELLED) {
@@ -98,6 +103,12 @@ public class AdminOrderService {
                     .forEach(line -> inventoryService.restoreStock(line.getProduct().getId(), line.getQuantity()));
         }
 
-        return orderMapper.toResponse(orderRepository.saveAndFlush(order));
+        Order saved = orderRepository.saveAndFlush(order);
+        log.info(
+                "event=admin_order_status_changed orderId={} from={} to={}",
+                saved.getId(),
+                previous,
+                saved.getStatus());
+        return orderMapper.toResponse(saved);
     }
 }

@@ -33,6 +33,15 @@ class ProdConfigurationTest {
             assertThat(context.getEnvironment().getProperty("springdoc.swagger-ui.enabled")).isEqualTo("false");
             assertThat(context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
             assertThat(context.getEnvironment().getProperty("spring.flyway.enabled")).isEqualTo("true");
+            assertThat(context.getEnvironment().getProperty("management.endpoints.web.exposure.include"))
+                    .isEqualTo("health,prometheus");
+            assertThat(context.getEnvironment().getProperty("management.endpoint.env.enabled")).isEqualTo("false");
+            assertThat(context.getEnvironment().getProperty("management.endpoint.env.show-values"))
+                    .isEqualTo("never");
+            assertThat(context.getEnvironment().getProperty("management.endpoint.health.show-details"))
+                    .isEqualTo("never");
+            assertThat(context.getEnvironment().getProperty("management.endpoint.heapdump.enabled"))
+                    .isEqualTo("false");
         }
     }
 

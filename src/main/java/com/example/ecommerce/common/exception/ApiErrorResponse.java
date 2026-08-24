@@ -1,5 +1,6 @@
 package com.example.ecommerce.common.exception;
 
+import com.example.ecommerce.common.logging.CorrelationIds;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 
@@ -13,6 +14,13 @@ public record ApiErrorResponse(
         @Schema(example = "409") int status,
         @Schema(example = "INSUFFICIENT_STOCK") String code,
         @Schema(example = "Insufficient stock for product 42") String message,
-        @Schema(example = "/api/v1/orders") String path
+        @Schema(example = "/api/v1/orders") String path,
+        @Schema(description = "Request correlation ID", example = "7c9e6679-7425-40de-944b-e07fc1f90ae7")
+        String correlationId
 ) {
+    public ApiErrorResponse {
+        correlationId = correlationId == null || correlationId.isBlank()
+                ? CorrelationIds.currentOrEmpty()
+                : correlationId;
+    }
 }

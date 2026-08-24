@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ecommerce.common.cache.CatalogCacheErrorHandler;
 import com.example.ecommerce.common.config.ApplicationProperties;
+import com.example.ecommerce.common.observability.FailOpenRedisHealthIndicator;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
@@ -12,7 +13,7 @@ import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationState;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.actuate.health.HealthContributorRegistry;
+import org.springframework.boot.actuate.jdbc.DataSourceHealthIndicator;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.cache.interceptor.CacheInterceptor;
@@ -78,9 +79,6 @@ class EcommerceApplicationTest {
     @Autowired
     private Environment environment;
 
-    @Autowired
-    private HealthContributorRegistry healthContributorRegistry;
-
     @Test
     void contextLoads() {
         assertThat(restTemplate).isNotNull();
@@ -138,9 +136,17 @@ class EcommerceApplicationTest {
         assertThat(environment.getProperty("spring.jpa.properties.hibernate.jdbc.time_zone")).isEqualTo("UTC");
     }
 
+    @Autowired
+    private DataSourceHealthIndicator dataSourceHealthIndicator;
+
+    @Autowired
+    private FailOpenRedisHealthIndicator redisHealthIndicator;
+
     @Test
-    void databaseHealthContributorIsRegistered() {
-        assertThat(healthContributorRegistry.getContributor("db")).isNotNull();
+    void databaseAndRedisHealthContributorsAreRegistered() {
+        assertThat(dataSourceHealthIndicator.health().getStatus().getCode()).isEqualTo("UP");
+        assertThat(redisHealthIndicator.health().getStatus().getCode()).isEqualTo("UP");
+        assertThat(redisHealthIndicator.health().getDetails()).containsEntry("available", true);
     }
 
     @Test

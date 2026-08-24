@@ -25,6 +25,8 @@ import com.example.ecommerce.user.repository.UserRepository;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -43,6 +45,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Transactional
 public class OrderService {
+
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     private final CurrentUserProvider currentUserProvider;
     private final UserRepository userRepository;
@@ -162,15 +166,31 @@ public class OrderService {
                 Order replayed = orderRepository
                         .findWithItemsByIdAndUserId(record.getOrder().getId(), userId)
                         .orElseThrow(() -> new OrderNotFoundException(record.getOrder().getId()));
+                log.info(
+                        "event=checkout_succeeded userId={} orderId={} orderNumber={} replayed=true",
+                        userId,
+                        replayed.getId(),
+                        replayed.getOrderNumber());
                 return new CheckoutResult(orderMapper.toResponse(replayed), true);
             }
             Order created = placeOrder(customer, command);
             checkoutIdempotencyKeyRepository.saveAndFlush(
                     CheckoutIdempotencyKey.completed(customer, key, fingerprint, created));
+            log.info(
+                    "event=checkout_succeeded userId={} orderId={} orderNumber={} replayed=false",
+                    userId,
+                    created.getId(),
+                    created.getOrderNumber());
             return new CheckoutResult(orderMapper.toResponse(created), false);
         }
 
-        return new CheckoutResult(orderMapper.toResponse(placeOrder(customer, command)), false);
+        Order created = placeOrder(customer, command);
+        log.info(
+                "event=checkout_succeeded userId={} orderId={} orderNumber={} replayed=false",
+                userId,
+                created.getId(),
+                created.getOrderNumber());
+        return new CheckoutResult(orderMapper.toResponse(created), false);
     }
 
     private Order placeOrder(User customer, CheckoutCommand command) {

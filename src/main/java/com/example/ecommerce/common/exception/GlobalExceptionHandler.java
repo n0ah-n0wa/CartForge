@@ -9,6 +9,7 @@ import com.example.ecommerce.cart.service.InvalidCartQuantityException;
 import com.example.ecommerce.category.service.CategoryInUseException;
 import com.example.ecommerce.category.service.CategoryNotFoundException;
 import com.example.ecommerce.category.service.DuplicateCategoryException;
+import com.example.ecommerce.common.logging.CorrelationIds;
 import com.example.ecommerce.common.pagination.InvalidSortException;
 import com.example.ecommerce.inventory.service.InsufficientStockException;
 import com.example.ecommerce.inventory.service.InvalidInventoryQuantityException;
@@ -123,12 +124,20 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler({InactiveProductForCartException.class, InactiveProductForCheckoutException.class})
     ResponseEntity<ApiErrorResponse> inactiveProduct(RuntimeException exception, HttpServletRequest request) {
+        log.warn(
+                "event=checkout_or_cart_conflict code=INACTIVE_PRODUCT path={} message={}",
+                request.getRequestURI(),
+                exception.getMessage());
         return ApiErrors.entity(HttpStatus.BAD_REQUEST, "INACTIVE_PRODUCT", exception.getMessage(), request);
     }
 
     @ExceptionHandler(InsufficientStockException.class)
     ResponseEntity<ApiErrorResponse> insufficientStock(
             InsufficientStockException exception, HttpServletRequest request) {
+        log.warn(
+                "event=checkout_or_cart_conflict code=INSUFFICIENT_STOCK path={} message={}",
+                request.getRequestURI(),
+                exception.getMessage());
         return ApiErrors.entity(HttpStatus.CONFLICT, "INSUFFICIENT_STOCK", exception.getMessage(), request);
     }
 
@@ -142,11 +151,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(InventoryConflictException.class)
     ResponseEntity<ApiErrorResponse> inventoryConflict(
             InventoryConflictException exception, HttpServletRequest request) {
+        log.warn(
+                "event=inventory_conflict code=INVENTORY_CONFLICT path={} message={}",
+                request.getRequestURI(),
+                exception.getMessage());
         return ApiErrors.entity(HttpStatus.CONFLICT, "INVENTORY_CONFLICT", exception.getMessage(), request);
     }
 
     @ExceptionHandler(EmptyCartException.class)
     ResponseEntity<ApiErrorResponse> emptyCart(EmptyCartException exception, HttpServletRequest request) {
+        log.warn("event=checkout_failed code=EMPTY_CART path={}", request.getRequestURI());
         return ApiErrors.entity(HttpStatus.CONFLICT, "EMPTY_CART", exception.getMessage(), request);
     }
 
@@ -159,6 +173,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(IdempotencyKeyConflictException.class)
     ResponseEntity<ApiErrorResponse> idempotencyKeyConflict(
             IdempotencyKeyConflictException exception, HttpServletRequest request) {
+        log.warn("event=checkout_failed code=IDEMPOTENCY_KEY_REUSED path={}", request.getRequestURI());
         return ApiErrors.entity(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED", exception.getMessage(), request);
     }
 
@@ -302,7 +317,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     ResponseEntity<ApiErrorResponse> unexpected(Exception exception, HttpServletRequest request) {
-        log.error("Unhandled exception path={}", request.getRequestURI(), exception);
+        log.error(
+                "event=unexpected_error path={} correlationId={}",
+                request.getRequestURI(),
+                CorrelationIds.currentOrEmpty(),
+                exception);
         return ApiErrors.entity(
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR",
@@ -408,7 +427,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             status = HttpStatus.INTERNAL_SERVER_ERROR;
         }
         if (status.is5xxServerError()) {
-            log.error("Spring MVC error path={}", path(request), exception);
+            log.error(
+                    "event=spring_mvc_error path={} correlationId={}",
+                    path(request),
+                    CorrelationIds.currentOrEmpty(),
+                    exception);
         }
         String code = status.is4xxClientError() ? "REQUEST_ERROR" : "INTERNAL_ERROR";
         String message = status.is4xxClientError()

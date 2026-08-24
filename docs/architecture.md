@@ -134,13 +134,13 @@ Checkout must: load the cart, reject an empty cart, verify active products and s
 
 Redis cache keys must be deterministic (`product:{id}`, `category:{id}`, `products:{query-hash}`). Writes invalidate affected keys. If Redis is unavailable, the application logs a warning and reads PostgreSQL. Authentication endpoints use a Redis fixed-window rate limit that fails open if Redis is down; see [ADR 0008](adr/0008-auth-rate-limiting.md).
 
-## Cross-cutting concerns (specified, not built)
+## Cross-cutting concerns
 
 - JWT Bearer authentication and role checks.
 - Jakarta Bean Validation at the API edge.
 - Allowlisted sort fields and enforced maximum page size.
-- Request correlation ID (`X-Correlation-ID` or generated).
-- Actuator health, readiness, and liveness for Kubernetes.
+- Request correlation ID (`X-Correlation-ID` or generated), returned on the response and on error JSON.
+- Actuator health, liveness, readiness (PostgreSQL), fail-open Redis status, and Prometheus metrics (`/actuator/prometheus`).
 - Structured logging without passwords, hashes, JWTs, or authorization headers.
 
 ## Non-goals

@@ -9,6 +9,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -25,6 +27,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class SecurityProblemHandlers {
 
+    private static final Logger log = LoggerFactory.getLogger(SecurityProblemHandlers.class);
+
     private final ObjectWriter errorWriter;
 
     public SecurityProblemHandlers(ObjectMapper objectMapper) {
@@ -39,7 +43,8 @@ public class SecurityProblemHandlers {
                 HttpServletResponse.SC_UNAUTHORIZED,
                 "UNAUTHORIZED",
                 "Authentication is required",
-                "Bearer");
+                "Bearer",
+                "event=authentication_rejected path={}");
     }
 
     public AccessDeniedHandler forbidden() {
@@ -49,7 +54,8 @@ public class SecurityProblemHandlers {
                 HttpServletResponse.SC_FORBIDDEN,
                 "FORBIDDEN",
                 "Access is denied",
-                null);
+                null,
+                "event=authorization_denied path={}");
     }
 
     private void write(
@@ -58,8 +64,12 @@ public class SecurityProblemHandlers {
             int status,
             String code,
             String message,
-            String authenticate)
+            String authenticate,
+            String logTemplate)
             throws IOException {
+        // Log only the path. Never log the exception message: JWT decoder failures
+        // often embed token claims, expiry text, or class names.
+        log.info(logTemplate, request.getRequestURI());
         if (response.isCommitted()) {
             return;
         }
@@ -72,6 +82,6 @@ public class SecurityProblemHandlers {
         }
         errorWriter.writeValue(
                 response.getOutputStream(),
-                ApiErrors.of(HttpStatus.valueOf(status), code, message, request.getRequestURI()));
+                ApiErrors.of(HttpStatus.valueOf(status), code, message, request));
     }
 }

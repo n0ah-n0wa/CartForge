@@ -6,6 +6,8 @@ import com.example.ecommerce.user.dto.UserResponse;
 import com.example.ecommerce.user.entity.User;
 import com.example.ecommerce.user.mapper.UserMapper;
 import com.example.ecommerce.user.repository.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -14,6 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Transactional
 public class RegistrationService {
+
+    private static final Logger log = LoggerFactory.getLogger(RegistrationService.class);
 
     private final UserRepository userRepository;
     private final UserMapper userMapper;
@@ -46,7 +50,9 @@ public class RegistrationService {
                 UserRole.CUSTOMER);
 
         try {
-            return userMapper.toResponse(userRepository.saveAndFlush(user));
+            UserResponse response = userMapper.toResponse(userRepository.saveAndFlush(user));
+            log.info("event=registration_succeeded userId={} email={}", response.id(), response.email());
+            return response;
         } catch (DataIntegrityViolationException duplicate) {
             // The pre-check cannot close the window between two concurrent
             // registrations; uq_users_email_lower is the real guard.

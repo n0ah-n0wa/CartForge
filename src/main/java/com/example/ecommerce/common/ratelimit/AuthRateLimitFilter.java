@@ -84,6 +84,6 @@ public final class AuthRateLimitFilter extends OncePerRequestFilter {
                         HttpStatus.TOO_MANY_REQUESTS,
                         "RATE_LIMIT_EXCEEDED",
                         "Too many requests. Try again later.",
-                        request.getRequestURI()));
+                        request));
     }
 }

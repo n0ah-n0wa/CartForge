@@ -4,6 +4,8 @@ import com.example.ecommerce.inventory.dto.StockLevel;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.product.repository.ProductRepository;
 import com.example.ecommerce.product.service.ProductNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Transactional
 public class InventoryService {
+
+    private static final Logger log = LoggerFactory.getLogger(InventoryService.class);
 
     private final ProductRepository productRepository;
 
@@ -70,6 +74,11 @@ public class InventoryService {
         Product product = requireProduct(productId);
         int available = committedStock(productId);
         if (quantity > available) {
+            log.warn(
+                    "event=insufficient_stock productId={} available={} requested={}",
+                    product.getId(),
+                    available,
+                    quantity);
             throw new InsufficientStockException(product.getId(), available, quantity);
         }
     }
@@ -87,6 +96,7 @@ public class InventoryService {
         try {
             return toStockLevel(productRepository.saveAndFlush(product));
         } catch (OptimisticLockingFailureException conflict) {
+            log.warn("event=inventory_conflict productId={}", product.getId());
             throw new InventoryConflictException(product.getId());
         }
     }
@@ -115,6 +125,11 @@ public class InventoryService {
     private static void ensureSufficientStock(Product product, int requestedQuantity) {
         int available = product.getStockQuantity();
         if (requestedQuantity > available) {
+            log.warn(
+                    "event=insufficient_stock productId={} available={} requested={}",
+                    product.getId(),
+                    available,
+                    requestedQuantity);
             throw new InsufficientStockException(product.getId(), available, requestedQuantity);
         }
     }

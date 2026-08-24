@@ -24,9 +24,9 @@ public final class FailOpenAuthRateLimiter implements AuthRateLimiter {
             return delegate.check(endpoint, clientKey);
         } catch (RuntimeException exception) {
             log.warn(
-                    "Auth rate limit check failed; allowing request. endpoint={}: {}",
+                    "event=auth_rate_limit_fail_open endpoint={} cause={}",
                     endpoint,
-                    exception.toString());
+                    exception.getClass().getSimpleName());
             return RateLimitDecision.allow();
         }
     }

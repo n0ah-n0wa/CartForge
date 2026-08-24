@@ -178,7 +178,7 @@ Additional infrastructure gates: `docker build`, `helm lint`, `helm template`.
 | JWT | From environment | Secure external secret |
 | CORS | Configured local origins | Explicit allowlist |
 | Logging | May be verbose | Appropriate production level; no secrets |
-| Actuator | Health for local probes | No sensitive env exposure |
+| Actuator | Health, liveness, readiness, Prometheus scrape | Same endpoints; no env/heapdump/beans; health details never shown |
 | Image tag | May use `latest` for convenience | SHA tag |
 
 ## Health and shutdown

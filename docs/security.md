@@ -118,7 +118,7 @@ Inbound payloads are structurally prevented from carrying ownership: `ApiBoundar
 
 - Store only password hashes.
 - Never return hashes from any API.
-- Do not log passwords, password hashes, JWTs, authentication secrets, or complete authorization headers. `RegistrationRequest`, `LoginRequest`, and `AccessTokenResponse` override the record-generated `toString` to redact secrets. `AuthenticationService` logs failed logins as `Authentication failed for email=...` and never writes the password.
+- Do not log passwords, password hashes, JWTs, authentication secrets, or complete authorization headers. `RegistrationRequest`, `LoginRequest`, and `AccessTokenResponse` override the record-generated `toString` to redact secrets. `AuthenticationService` logs `event=authentication_failed email=...` and never writes the password. Access logs record method, path, status, and duration only.
 - Disabled users (`enabled = false`) must not authenticate. `AuthenticationService` enforces this and reports it as invalid credentials rather than as a distinct state. A token issued before disablement remains valid until `exp`; there is no denylist (the specification does not require one).
 
 ## Input validation and errors
@@ -131,7 +131,8 @@ All external input is validated with Jakarta Bean Validation. Validation and bus
   "status": 409,
   "code": "INSUFFICIENT_STOCK",
   "message": "Insufficient stock for product 42",
-  "path": "/api/v1/orders"
+  "path": "/api/v1/orders",
+  "correlationId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
 }
 ```
 
@@ -166,15 +167,19 @@ Images must not embed secrets.
 
 ## Actuator and HTTP hardening
 
-- Expose only Actuator endpoints that are safe and necessary.
-- Production must not expose sensitive environment information.
-- Kubernetes probes use `/actuator/health/readiness` and `/actuator/health/liveness`.
+- Expose only Actuator endpoints that are safe and necessary: `health` and `prometheus`. `env`, `beans`, `configprops`, `heapdump`, `threaddump`, `mappings`, and `shutdown` are disabled.
+- Production must not expose sensitive environment information. Health responses use `show-details: never` and `show-components: never`. Redis health is fail-open (`available` true/false) so a Redis outage does not mark the process DOWN.
+- Kubernetes probes use `/actuator/health/readiness` (process + PostgreSQL) and `/actuator/health/liveness` (process only). `/actuator/prometheus` is scrapeable without a JWT and must be network-restricted.
 - Use secure HTTP headers where applicable. Spring Security's defaults are enabled (`X-Content-Type-Options`, `X-Frame-Options: DENY`, `Cache-Control`).
 - Form login and HTTP Basic are disabled. Query-string tokens are ignored; only `Authorization: Bearer` authenticates.
 
 ## Logging and correlation
 
-Logs should include enough context to debug a request. If the client sends `X-Correlation-ID`, propagate it; otherwise generate one. Include the correlation ID in error responses where appropriate.
+Every request gets a correlation ID: the client may send `X-Correlation-ID`, otherwise the API generates a UUID. The value is returned on the same response header, stored in SLF4J MDC as `correlationId`, and included on error JSON as `correlationId`. Unsafe inbound values (control characters, excess length) are replaced with a generated ID so they cannot poison log lines.
+
+Access logs record `method`, `path`, `status`, and `durationMs` only. They never log query strings, bodies, or headers, so passwords, JWTs, and `Authorization` values cannot appear.
+
+Domain logs use key=value fields for authentication outcomes, registration, checkout success/failure, inventory conflicts, administrative product and order changes, and unexpected 500s. Authentication failure logs include the email attempt but never the password. Security 401/403 handlers log the path only and never the JWT decoder exception message.
 
 Log authentication failures, administrative operations, checkout failures, inventory conflicts, and unexpected exceptions.
 

@@ -17,37 +17,37 @@ public final class CatalogCacheErrorHandler implements CacheErrorHandler {
     @Override
     public void handleCacheGetError(RuntimeException exception, Cache cache, Object key) {
         log.warn(
-                "Cache GET failed; reading from PostgreSQL. cache={}, key={}: {}",
+                "event=cache_get_failed cache={} key={} cause={}; reading from PostgreSQL",
                 cache.getName(),
                 key,
-                exception.toString());
+                exception.getClass().getSimpleName());
     }
 
     @Override
     public void handleCachePutError(RuntimeException exception, Cache cache, Object key, Object value) {
         log.warn(
-                "Cache PUT failed; continuing without caching. cache={}, key={}: {}",
+                "event=cache_put_failed cache={} key={} cause={}; continuing without caching",
                 cache.getName(),
                 key,
-                exception.toString());
+                exception.getClass().getSimpleName());
     }
 
     @Override
     public void handleCacheEvictError(RuntimeException exception, Cache cache, Object key) {
         log.warn(
-                "Cache EVICT failed; attempting full clear. cache={}, key={}: {}",
+                "event=cache_evict_failed cache={} key={} cause={}; attempting full clear",
                 cache.getName(),
                 key,
-                exception.toString());
+                exception.getClass().getSimpleName());
         clearBestEffort(cache);
     }
 
     @Override
     public void handleCacheClearError(RuntimeException exception, Cache cache) {
         log.warn(
-                "Cache CLEAR failed; stale entries may remain until TTL. cache={}: {}",
+                "event=cache_clear_failed cache={} cause={}; stale entries may remain until TTL",
                 cache.getName(),
-                exception.toString());
+                exception.getClass().getSimpleName());
     }
 
     private static void clearBestEffort(Cache cache) {
@@ -55,9 +55,9 @@ public final class CatalogCacheErrorHandler implements CacheErrorHandler {
             cache.clear();
         } catch (RuntimeException clearFailed) {
             log.error(
-                    "Cache CLEAR also failed after EVICT error; stale entries may remain until TTL. cache={}: {}",
+                    "event=cache_clear_failed cache={} cause={}; stale entries may remain until TTL",
                     cache.getName(),
-                    clearFailed.toString());
+                    clearFailed.getClass().getSimpleName());
         }
     }
 }

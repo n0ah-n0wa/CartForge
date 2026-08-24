@@ -22,7 +22,10 @@ public class OpenApiConfig {
                 .addProperty("status", new Schema<>().type("integer").example(409))
                 .addProperty("code", new Schema<>().type("string").example("INSUFFICIENT_STOCK"))
                 .addProperty("message", new Schema<>().type("string").example("Insufficient stock for product 42"))
-                .addProperty("path", new Schema<>().type("string").example("/api/v1/orders"));
+                .addProperty("path", new Schema<>().type("string").example("/api/v1/orders"))
+                .addProperty(
+                        "correlationId",
+                        new Schema<>().type("string").example("7c9e6679-7425-40de-944b-e07fc1f90ae7"));
 
         return new OpenAPI()
                 .info(new Info()

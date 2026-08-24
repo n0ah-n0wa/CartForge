@@ -25,14 +25,32 @@ app:
 
 management:
   endpoints:
+    enabled-by-default: false
     web:
       exposure:
-        include: health
+        include: health,prometheus
   endpoint:
     health:
+      enabled: true
       show-details: never
+      show-components: never
+    prometheus:
+      enabled: true
     env:
+      enabled: false
       show-values: never
+    heapdump:
+      enabled: false
+    threaddump:
+      enabled: false
+    beans:
+      enabled: false
+    configprops:
+      enabled: false
+    mappings:
+      enabled: false
+    shutdown:
+      enabled: false
 
 springdoc:
   swagger-ui:

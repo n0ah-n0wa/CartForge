@@ -1,5 +1,6 @@
 package com.example.ecommerce.common.exception;
 
+import com.example.ecommerce.common.logging.CorrelationIds;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -22,7 +23,8 @@ public final class ApiErrors {
                 status.value(),
                 code,
                 Objects.requireNonNullElse(message, "Error"),
-                path == null ? "" : path);
+                path == null ? "" : path,
+                CorrelationIds.currentOrEmpty());
     }
 
     public static ApiErrorResponse of(
