@@ -85,6 +85,11 @@ app:
   pagination:
     default-page-size: ${APP_PAGINATION_DEFAULT_PAGE_SIZE:20}
     max-page-size: ${APP_PAGINATION_MAX_PAGE_SIZE:100}
+  rate-limit:
+    auth:
+      enabled: ${APP_RATE_LIMIT_AUTH_ENABLED:true}
+      limit: ${APP_RATE_LIMIT_AUTH_LIMIT:20}
+      window-seconds: ${APP_RATE_LIMIT_AUTH_WINDOW_SECONDS:60}
 
 springdoc:
   api-docs:

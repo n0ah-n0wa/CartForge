@@ -26,10 +26,13 @@ import com.example.ecommerce.inventory.service.InventoryService;
 import com.example.ecommerce.order.OrderStatus;
 import com.example.ecommerce.order.OrderStatusTransitionException;
 import com.example.ecommerce.order.dto.CheckoutCommand;
+import com.example.ecommerce.order.dto.CheckoutResult;
 import com.example.ecommerce.order.dto.OrderResponse;
 import com.example.ecommerce.order.dto.OrderSummaryResponse;
+import com.example.ecommerce.order.entity.CheckoutIdempotencyKey;
 import com.example.ecommerce.order.entity.Order;
 import com.example.ecommerce.order.mapper.OrderMapper;
+import com.example.ecommerce.order.repository.CheckoutIdempotencyKeyRepository;
 import com.example.ecommerce.order.repository.OrderRepository;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.user.entity.User;
@@ -70,6 +73,9 @@ class OrderServiceTest {
     private OrderRepository orderRepository;
 
     @Mock
+    private CheckoutIdempotencyKeyRepository checkoutIdempotencyKeyRepository;
+
+    @Mock
     private InventoryService inventoryService;
 
     @Mock
@@ -84,12 +90,14 @@ class OrderServiceTest {
         ApplicationProperties properties = new ApplicationProperties(
                 new ApplicationProperties.Jwt("test-only-jwt-secret-not-for-production-use", 3_600_000L),
                 new ApplicationProperties.Cors(List.of("http://localhost")),
-                new ApplicationProperties.Pagination(20, 100));
+                new ApplicationProperties.Pagination(20, 100),
+                ApplicationProperties.RateLimit.defaults());
         orderService = new OrderService(
                 currentUserProvider,
                 userRepository,
                 cartRepository,
                 orderRepository,
+                checkoutIdempotencyKeyRepository,
                 inventoryService,
                 orderNumberGenerator,
                 orderMapper,
@@ -274,6 +282,144 @@ class OrderServiceTest {
         assertThat(response.items().getFirst().productName()).isEqualTo("Keyboard");
         assertThat(response.items().getFirst().unitPrice()).isEqualByComparingTo("49.50");
         assertThat(response.totalAmount()).isEqualByComparingTo("49.50");
+    }
+
+    @Test
+    void checkoutWithoutIdempotencyKeyDoesNotTouchIdempotencyRecords() {
+        User customer = user(USER_ID);
+        Product keyboard = product(PRODUCT_ID, "KB-001", "Keyboard", "keyboard", "49.50", 10, true);
+        Cart cart = Cart.forUser(customer);
+        cart.addOrIncrease(keyboard, 1);
+
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
+        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
+        when(orderNumberGenerator.nextOrderNumber()).thenReturn("ORD-2026-000004");
+        when(inventoryService.decreaseStock(PRODUCT_ID, 1))
+                .thenReturn(new StockLevel(PRODUCT_ID, 9, 1L));
+        when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> {
+            Order order = invocation.getArgument(0);
+            ReflectionTestUtils.setField(order, "id", 104L);
+            return order;
+        });
+        when(cartRepository.save(cart)).thenReturn(cart);
+
+        orderService.checkout(CHECKOUT, null);
+
+        verify(checkoutIdempotencyKeyRepository, never()).lockByUserIdAndKey(anyLong(), any());
+        verify(checkoutIdempotencyKeyRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void checkoutWithIdempotencyKeyReplaysTheOriginalOrderWithoutMutatingAgain() {
+        User customer = user(USER_ID);
+        Product keyboard = product(PRODUCT_ID, "KB-001", "Keyboard", "keyboard", "49.50", 10, true);
+        Order existingOrder = Order.place("ORD-2026-000005", customer, CHECKOUT.shippingAddress(), CurrencyCode.EUR);
+        existingOrder.addItem(keyboard, 1);
+        ReflectionTestUtils.setField(existingOrder, "id", 105L);
+        CheckoutIdempotencyKey record = CheckoutIdempotencyKey.completed(
+                customer, "key-1", IdempotencyKeys.fingerprint(CHECKOUT), existingOrder);
+
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
+        when(checkoutIdempotencyKeyRepository.findByUserIdAndIdempotencyKey(USER_ID, "key-1"))
+                .thenReturn(Optional.of(record));
+        when(orderRepository.findWithItemsByIdAndUserId(105L, USER_ID)).thenReturn(Optional.of(existingOrder));
+
+        CheckoutResult result = orderService.checkout(CHECKOUT, "key-1");
+
+        assertThat(result.replayed()).isTrue();
+        assertThat(result.order().id()).isEqualTo(105L);
+        assertThat(result.order().orderNumber()).isEqualTo("ORD-2026-000005");
+        verify(checkoutIdempotencyKeyRepository).lockByUserIdAndKey(USER_ID, "key-1");
+        verify(inventoryService, never()).decreaseStock(anyLong(), anyInt());
+        verify(orderRepository, never()).saveAndFlush(any());
+        verify(cartRepository, never()).findWithItemsByUserIdForUpdate(anyLong());
+    }
+
+    @Test
+    void checkoutRejectsIdempotencyKeyReusedWithADifferentBody() {
+        User customer = user(USER_ID);
+        Product keyboard = product(PRODUCT_ID, "KB-001", "Keyboard", "keyboard", "49.50", 10, true);
+        Order existingOrder = Order.place("ORD-2026-000006", customer, CHECKOUT.shippingAddress(), CurrencyCode.EUR);
+        existingOrder.addItem(keyboard, 1);
+        ReflectionTestUtils.setField(existingOrder, "id", 106L);
+        CheckoutIdempotencyKey record = CheckoutIdempotencyKey.completed(
+                customer, "key-1", IdempotencyKeys.fingerprint(CHECKOUT), existingOrder);
+
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
+        when(checkoutIdempotencyKeyRepository.findByUserIdAndIdempotencyKey(USER_ID, "key-1"))
+                .thenReturn(Optional.of(record));
+
+        assertThatThrownBy(() -> orderService.checkout(new CheckoutCommand("Other address"), "key-1"))
+                .isInstanceOf(IdempotencyKeyConflictException.class);
+
+        verify(orderRepository, never()).saveAndFlush(any());
+        verify(inventoryService, never()).decreaseStock(anyLong(), anyInt());
+    }
+
+    @Test
+    void checkoutStoresIdempotencyRecordOnlyAfterASuccessfulOrder() {
+        User customer = user(USER_ID);
+        Product keyboard = product(PRODUCT_ID, "KB-001", "Keyboard", "keyboard", "49.50", 10, true);
+        Cart cart = Cart.forUser(customer);
+        cart.addOrIncrease(keyboard, 1);
+
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
+        when(checkoutIdempotencyKeyRepository.findByUserIdAndIdempotencyKey(USER_ID, "key-1"))
+                .thenReturn(Optional.empty());
+        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
+        when(orderNumberGenerator.nextOrderNumber()).thenReturn("ORD-2026-000007");
+        when(inventoryService.decreaseStock(PRODUCT_ID, 1))
+                .thenReturn(new StockLevel(PRODUCT_ID, 9, 1L));
+        when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> {
+            Order order = invocation.getArgument(0);
+            ReflectionTestUtils.setField(order, "id", 107L);
+            return order;
+        });
+        when(cartRepository.save(cart)).thenReturn(cart);
+        when(checkoutIdempotencyKeyRepository.saveAndFlush(any(CheckoutIdempotencyKey.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        CheckoutResult result = orderService.checkout(CHECKOUT, "key-1");
+
+        assertThat(result.replayed()).isFalse();
+        assertThat(result.order().id()).isEqualTo(107L);
+        ArgumentCaptor<CheckoutIdempotencyKey> keyCaptor = ArgumentCaptor.forClass(CheckoutIdempotencyKey.class);
+        verify(checkoutIdempotencyKeyRepository).saveAndFlush(keyCaptor.capture());
+        assertThat(keyCaptor.getValue().getIdempotencyKey()).isEqualTo("key-1");
+        assertThat(keyCaptor.getValue().getRequestFingerprint()).isEqualTo(IdempotencyKeys.fingerprint(CHECKOUT));
+        assertThat(keyCaptor.getValue().getOrder().getId()).isEqualTo(107L);
+    }
+
+    @Test
+    void checkoutDoesNotStoreIdempotencyRecordWhenCheckoutFails() {
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user(USER_ID)));
+        when(checkoutIdempotencyKeyRepository.findByUserIdAndIdempotencyKey(USER_ID, "key-1"))
+                .thenReturn(Optional.empty());
+        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> orderService.checkout(CHECKOUT, "key-1"))
+                .isInstanceOf(EmptyCartException.class);
+
+        verify(checkoutIdempotencyKeyRepository).lockByUserIdAndKey(USER_ID, "key-1");
+        verify(checkoutIdempotencyKeyRepository, never()).saveAndFlush(any());
+        verify(orderRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void checkoutRejectsInvalidIdempotencyKeyBeforeLocking() {
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user(USER_ID)));
+
+        assertThatThrownBy(() -> orderService.checkout(CHECKOUT, " "))
+                .isInstanceOf(InvalidIdempotencyKeyException.class);
+
+        verify(checkoutIdempotencyKeyRepository, never()).lockByUserIdAndKey(anyLong(), any());
+        verify(cartRepository, never()).findWithItemsByUserIdForUpdate(anyLong());
     }
 
     @Test

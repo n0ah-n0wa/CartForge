@@ -57,6 +57,7 @@ class CorsConfigTest {
         return new ApplicationProperties(
                 new ApplicationProperties.Jwt("test-only-jwt-secret-not-for-production", 900_000L),
                 new ApplicationProperties.Cors(List.of(origin)),
-                new ApplicationProperties.Pagination(20, 100));
+                new ApplicationProperties.Pagination(20, 100),
+                ApplicationProperties.RateLimit.defaults());
     }
 }

@@ -145,16 +145,16 @@ CORS is environment-dependent. Development may allow configured local origins. P
 
 ## Rate limiting
 
-Authentication endpoints must be protected against uncontrolled bursts:
+Authentication endpoints are protected against uncontrolled bursts:
 
 ```text
 POST /api/v1/auth/login
 POST /api/v1/auth/register
 ```
 
-Section 41 writes unversioned `/auth/login` and `/auth/register`. All business endpoints must use `/api/v1`. The planned targets are the versioned paths above.
+Section 41 writes unversioned `/auth/login` and `/auth/register`. All business endpoints use `/api/v1`. The implemented targets are the versioned paths above.
 
-Redis may back the limiter. If Redis is down, the API must remain usable: fail open, log a warning, and document that choice. If a robust limiter is deferred, the omission must be documented rather than silent.
+Redis backs a fixed-window counter per client IP. If Redis is down, the API remains usable: fail open, log a warning, and continue. See [ADR 0008](adr/0008-auth-rate-limiting.md).
 
 ## Secrets
 

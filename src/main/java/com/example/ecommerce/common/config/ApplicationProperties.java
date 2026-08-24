@@ -15,7 +15,8 @@ import org.springframework.validation.annotation.Validated;
 public record ApplicationProperties(
         @NotNull @Valid Jwt jwt,
         @NotNull @Valid Cors cors,
-        @NotNull @Valid Pagination pagination
+        @NotNull @Valid Pagination pagination,
+        @NotNull @Valid RateLimit rateLimit
 ) {
 
     public record Jwt(
@@ -45,6 +46,20 @@ public record ApplicationProperties(
             @Min(1) int defaultPageSize,
             @Min(1) int maxPageSize
     ) {
+    }
+
+    public record RateLimit(@NotNull @Valid Auth auth) {
+
+        public static RateLimit defaults() {
+            return new RateLimit(new Auth(true, 20, 60));
+        }
+
+        public record Auth(
+                boolean enabled,
+                @Min(1) int limit,
+                @Min(1) int windowSeconds
+        ) {
+        }
     }
 
     @AssertTrue(message = "app.pagination.max-page-size must be greater than or equal to default-page-size")

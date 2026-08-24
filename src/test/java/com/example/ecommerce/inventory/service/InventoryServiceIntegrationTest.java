@@ -167,7 +167,7 @@ class InventoryServiceIntegrationTest {
                         try {
                             inventoryService.decreaseStock(productId, 1);
                             successes.incrementAndGet();
-                        } catch (InventoryConflictException conflict) {
+                        } catch (InventoryConflictException | InsufficientStockException conflict) {
                             conflicts.incrementAndGet();
                         }
                     } catch (InterruptedException interrupted) {
@@ -194,6 +194,55 @@ class InventoryServiceIntegrationTest {
         // Without optimistic locking, lost updates would leave stock too high.
         assertThat(successes.get()).isGreaterThanOrEqualTo(1);
         assertThat(finalLevel.stockQuantity() + successes.get()).isEqualTo(CONCURRENT_DECREASES);
+    }
+
+    @Test
+    void concurrentDecreasesAgainstScarceStockSellExactlyAvailableUnits() throws Exception {
+        final int stock = 3;
+        final int attempts = 10;
+        Long productId = persistProduct("KB-SCARCE", "keyboard-scarce", stock).getId();
+
+        CountDownLatch ready = new CountDownLatch(attempts);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger successes = new AtomicInteger();
+        AtomicInteger rejected = new AtomicInteger();
+        ExecutorService pool = Executors.newFixedThreadPool(attempts);
+        List<Future<?>> futures = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < attempts; i++) {
+                futures.add(pool.submit(() -> {
+                    try {
+                        ready.countDown();
+                        if (!start.await(10, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("timed out waiting to start");
+                        }
+                        try {
+                            inventoryService.decreaseStock(productId, 1);
+                            successes.incrementAndGet();
+                        } catch (InventoryConflictException | InsufficientStockException conflict) {
+                            rejected.incrementAndGet();
+                        }
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(interrupted);
+                    }
+                }));
+            }
+
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            for (Future<?> future : futures) {
+                future.get(30, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+            assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+
+        assertThat(successes.get()).isEqualTo(stock);
+        assertThat(rejected.get()).isEqualTo(attempts - stock);
+        assertThat(inventoryService.getStockLevel(productId).stockQuantity()).isZero();
     }
 
     private Product persistProduct(String sku, String slug, int stock) {

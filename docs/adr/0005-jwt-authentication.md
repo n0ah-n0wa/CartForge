@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (mandated by `SPECIFICATIONS.md` v1.0.0)
 - **Date:** 2026-08-22
-- **Implementation:** issuance, validation, and Bearer authentication are in place. Signing uses Spring Security's resource-server support (Nimbus, HS256) rather than a third-party JWT library, so no new dependency was introduced beyond a Spring Boot starter. No auth controller exists yet.
+- **Implementation:** issuance, validation, Bearer authentication, and `AuthController` (`POST /api/v1/auth/register`, `POST /api/v1/auth/login`) are in place. Signing uses Spring Security's resource-server support (Nimbus, HS256) rather than a third-party JWT library, so no new dependency was introduced beyond a Spring Boot starter.
 
 ## Context
 

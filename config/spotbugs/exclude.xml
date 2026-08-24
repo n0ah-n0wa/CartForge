@@ -18,4 +18,9 @@
         <Package name="~com\.example\.ecommerce\..*\.controller"/>
         <Bug pattern="EI_EXPOSE_REP2"/>
     </Match>
+    <!-- Rate limiters hold Spring-managed Redis templates by design. -->
+    <Match>
+        <Class name="com.example.ecommerce.common.ratelimit.RedisFixedWindowAuthRateLimiter"/>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
 </FindBugsFilter>

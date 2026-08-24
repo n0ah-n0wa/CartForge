@@ -119,6 +119,49 @@ class CheckoutConcurrencyIntegrationTest {
     }
 
     @Test
+    void manyBuyersOfLimitedStockNeverOversellOrLeavePartialOrders() throws Exception {
+        final int stock = 3;
+        final int buyers = 10;
+        Product keyboard = persistProduct("KB-LIM", "keyboard-lim", stock);
+        List<User> customers = new ArrayList<>();
+        for (int i = 0; i < buyers; i++) {
+            User buyer = persistCustomer("buyer-lim-" + i + "@example.com");
+            seedCart(buyer, keyboard, 1);
+            customers.add(buyer);
+        }
+
+        AtomicInteger created = new AtomicInteger();
+        AtomicInteger rejected = new AtomicInteger();
+        runConcurrent(buyers, customers, created, rejected);
+
+        assertThat(created.get()).isEqualTo(stock);
+        assertThat(rejected.get()).isEqualTo(buyers - stock);
+        assertThat(orderRepository.count()).isEqualTo(stock);
+        assertThat(productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity()).isZero();
+        assertThat(productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity())
+                .isGreaterThanOrEqualTo(0);
+
+        long clearedCarts = customers.stream()
+                .filter(user -> cartRepository.findWithItemsByUserId(user.getId())
+                        .map(Cart::isEmpty)
+                        .orElse(true))
+                .count();
+        long cartsStillHolding = customers.stream()
+                .map(user -> cartRepository.findWithItemsByUserId(user.getId()))
+                .filter(optional -> optional.isPresent() && !optional.get().isEmpty())
+                .count();
+        assertThat(clearedCarts).isEqualTo(stock);
+        assertThat(cartsStillHolding).isEqualTo(buyers - stock);
+
+        orderRepository.findAll().forEach(order -> {
+            var withItems = orderRepository.findWithItemsById(order.getId()).orElseThrow();
+            assertThat(withItems.getItems()).hasSize(1);
+            assertThat(withItems.getTotalAmount())
+                    .isEqualByComparingTo(withItems.getItems().getFirst().getLineTotal());
+        });
+    }
+
+    @Test
     void twoCustomersCannotBothBuyTheLastUnit() throws Exception {
         Product keyboard = persistProduct("KB-LAST", "keyboard-last", 1);
         User alice = persistCustomer("alice-last@example.com");

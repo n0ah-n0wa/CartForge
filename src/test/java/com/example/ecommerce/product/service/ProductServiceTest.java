@@ -52,7 +52,8 @@ class ProductServiceTest {
         ApplicationProperties properties = new ApplicationProperties(
                 new ApplicationProperties.Jwt("test-only-jwt-secret-not-for-production-use", 3_600_000L),
                 new ApplicationProperties.Cors(List.of("http://localhost")),
-                new ApplicationProperties.Pagination(20, 100));
+                new ApplicationProperties.Pagination(20, 100),
+                ApplicationProperties.RateLimit.defaults());
         productService = new ProductService(productRepository, categoryRepository, productMapper, properties);
     }
 

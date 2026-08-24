@@ -140,6 +140,7 @@ class JwtTokenServiceTest {
         return new ApplicationProperties(
                 new ApplicationProperties.Jwt(SECRET, expirationMs),
                 new ApplicationProperties.Cors(List.of("http://localhost")),
-                new ApplicationProperties.Pagination(20, 100));
+                new ApplicationProperties.Pagination(20, 100),
+                ApplicationProperties.RateLimit.defaults());
     }
 }

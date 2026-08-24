@@ -13,7 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>Cart lines do not reserve stock; callers that mutate inventory (checkout,
  * cancellation, admin restock) must go through this service so non-negativity,
- * transactions, and optimistic locking stay consistent.
+ * transactions, and locking stay consistent. Mutations take a product row lock
+ * then flush with optimistic {@code version} so concurrent catalog edits still
+ * surface as conflicts when appropriate.
  */
 @Service
 @Transactional
@@ -95,16 +97,14 @@ public class InventoryService {
     }
 
     /**
-     * Aligns the persistence-context copy with the database stock column. Cart
-     * checkout may already have the product loaded from an older select.
+     * Locks the product row and refreshes the persistence-context copy so stock
+     * and {@code version} match the database. Cart checkout may already have
+     * loaded the product; without a refresh a later flush would fail optimistic
+     * locking even after waiting for the row lock.
      */
     private Product requireProductForMutation(Long productId) {
-        Product product = requireProduct(productId);
-        int committed = committedStock(productId);
-        if (product.getStockQuantity() != committed) {
-            product.changeStock(committed);
-        }
-        return product;
+        return productRepository.findByIdForUpdate(productId)
+                .orElseThrow(() -> new ProductNotFoundException(productId));
     }
 
     private int committedStock(Long productId) {

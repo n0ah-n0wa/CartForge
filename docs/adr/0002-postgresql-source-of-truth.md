@@ -14,7 +14,7 @@ PostgreSQL is the only durable business store. Flyway owns schema change. Produc
 
 Critical invariants (non-negative price and stock, positive quantities, unique email/SKU/slug/order number) are enforced in the database as well as in the application.
 
-Order numbers and checkout idempotency records that must survive a Redis outage are planned as PostgreSQL data, allocated or written inside the checkout transaction.
+Order numbers and checkout idempotency records that must survive a Redis outage are PostgreSQL data, allocated or written inside the checkout transaction. See [ADR 0007](0007-checkout-idempotency.md).
 
 ## Consequences
 

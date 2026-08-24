@@ -10,17 +10,21 @@ import com.example.ecommerce.common.persistence.PersistenceConventions;
 import com.example.ecommerce.common.security.CurrentUserProvider;
 import com.example.ecommerce.inventory.service.InventoryService;
 import com.example.ecommerce.order.dto.CheckoutCommand;
+import com.example.ecommerce.order.dto.CheckoutResult;
 import com.example.ecommerce.order.dto.OrderResponse;
 import com.example.ecommerce.order.dto.OrderSummaryResponse;
+import com.example.ecommerce.order.entity.CheckoutIdempotencyKey;
 import com.example.ecommerce.order.entity.Order;
 import com.example.ecommerce.order.entity.OrderItem;
 import com.example.ecommerce.order.mapper.OrderMapper;
+import com.example.ecommerce.order.repository.CheckoutIdempotencyKeyRepository;
 import com.example.ecommerce.order.repository.OrderRepository;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.user.entity.User;
 import com.example.ecommerce.user.repository.UserRepository;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -32,7 +36,9 @@ import org.springframework.transaction.annotation.Transactional;
  * transaction: validate cart and catalog, snapshot prices, decrement stock,
  * persist the order, then clear the cart. Any failure rolls the whole unit back.
  *
- * <p>Idempotency is intentionally out of scope for this step.
+ * <p>When {@code Idempotency-Key} is present, a PostgreSQL row for that user and
+ * key is written only if checkout commits, so retries cannot create a second
+ * order and failed attempts do not reserve a successful replay.
  */
 @Service
 @Transactional
@@ -42,6 +48,7 @@ public class OrderService {
     private final UserRepository userRepository;
     private final CartRepository cartRepository;
     private final OrderRepository orderRepository;
+    private final CheckoutIdempotencyKeyRepository checkoutIdempotencyKeyRepository;
     private final InventoryService inventoryService;
     private final OrderNumberGenerator orderNumberGenerator;
     private final OrderMapper orderMapper;
@@ -52,6 +59,7 @@ public class OrderService {
             UserRepository userRepository,
             CartRepository cartRepository,
             OrderRepository orderRepository,
+            CheckoutIdempotencyKeyRepository checkoutIdempotencyKeyRepository,
             InventoryService inventoryService,
             OrderNumberGenerator orderNumberGenerator,
             OrderMapper orderMapper,
@@ -60,6 +68,7 @@ public class OrderService {
         this.userRepository = userRepository;
         this.cartRepository = cartRepository;
         this.orderRepository = orderRepository;
+        this.checkoutIdempotencyKeyRepository = checkoutIdempotencyKeyRepository;
         this.inventoryService = inventoryService;
         this.orderNumberGenerator = orderNumberGenerator;
         this.orderMapper = orderMapper;
@@ -122,15 +131,50 @@ public class OrderService {
     }
 
     /**
-     * Executes checkout for the authenticated customer.
-     *
-     * @return the persisted order including snapshot lines and total
+     * Executes checkout for the authenticated customer without an idempotency key.
      */
     public OrderResponse checkout(CheckoutCommand command) {
+        return checkout(command, null).order();
+    }
+
+    /**
+     * Executes checkout, optionally keyed by {@code Idempotency-Key}.
+     *
+     * @return the order and whether it was replayed from a prior successful key
+     */
+    public CheckoutResult checkout(CheckoutCommand command, String idempotencyKeyHeader) {
         long userId = currentUserProvider.requireUserId();
         User customer = userRepository.findById(userId)
                 .orElseThrow(() -> new OrderOwnerNotFoundException(userId));
 
+        var parsedKey = IdempotencyKeys.parse(idempotencyKeyHeader);
+        if (parsedKey.isPresent()) {
+            String key = parsedKey.get();
+            String fingerprint = IdempotencyKeys.fingerprint(command);
+            checkoutIdempotencyKeyRepository.lockByUserIdAndKey(userId, key);
+            Optional<CheckoutIdempotencyKey> existing =
+                    checkoutIdempotencyKeyRepository.findByUserIdAndIdempotencyKey(userId, key);
+            if (existing.isPresent()) {
+                CheckoutIdempotencyKey record = existing.get();
+                if (!fingerprint.equals(record.getRequestFingerprint())) {
+                    throw new IdempotencyKeyConflictException();
+                }
+                Order replayed = orderRepository
+                        .findWithItemsByIdAndUserId(record.getOrder().getId(), userId)
+                        .orElseThrow(() -> new OrderNotFoundException(record.getOrder().getId()));
+                return new CheckoutResult(orderMapper.toResponse(replayed), true);
+            }
+            Order created = placeOrder(customer, command);
+            checkoutIdempotencyKeyRepository.saveAndFlush(
+                    CheckoutIdempotencyKey.completed(customer, key, fingerprint, created));
+            return new CheckoutResult(orderMapper.toResponse(created), false);
+        }
+
+        return new CheckoutResult(orderMapper.toResponse(placeOrder(customer, command)), false);
+    }
+
+    private Order placeOrder(User customer, CheckoutCommand command) {
+        long userId = customer.getId();
         Cart cart = cartRepository.findWithItemsByUserIdForUpdate(userId)
                 .orElseThrow(EmptyCartException::new);
         if (cart.isEmpty()) {
@@ -163,7 +207,7 @@ public class OrderService {
         cart.clear();
         cartRepository.save(cart);
 
-        return orderMapper.toResponse(saved);
+        return saved;
     }
 
     private static List<CartItem> sortedLines(Cart cart) {

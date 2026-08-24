@@ -2,6 +2,7 @@ package com.example.ecommerce.order.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -18,6 +19,7 @@ import com.example.ecommerce.order.repository.OrderItemRepository;
 import com.example.ecommerce.order.repository.OrderRepository;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.product.repository.ProductRepository;
+import com.example.ecommerce.user.UserRole;
 import com.example.ecommerce.user.entity.User;
 import com.example.ecommerce.user.repository.UserRepository;
 import java.math.BigDecimal;
@@ -186,6 +188,169 @@ class OrderCancellationConcurrencyIntegrationTest {
         assertThat(conflicts.get()).isEqualTo(CONCURRENT_CANCELS - 1);
         assertThat(orderRepository.findById(orderId).orElseThrow().getStatus()).isEqualTo(OrderStatus.CANCELLED);
         assertThat(productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity()).isEqualTo(20);
+    }
+
+    @Test
+    void customerCancelAndAdminCancelRestoreInventoryOnlyOnce() throws Exception {
+        User admin = userRepository.saveAndFlush(User.create(
+                "admin-cancel-conc@example.com",
+                "test-only-password-hash",
+                "Root",
+                "Admin",
+                UserRole.ADMIN));
+        String adminBearer = bearer(admin);
+
+        AtomicInteger successes = new AtomicInteger();
+        AtomicInteger conflicts = new AtomicInteger();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        List<Future<?>> futures = new ArrayList<>();
+
+        try {
+            futures.add(pool.submit(() -> {
+                try {
+                    ready.countDown();
+                    if (!start.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("timed out waiting to start");
+                    }
+                    MvcResult result = mockMvc.perform(post("/api/v1/orders/" + orderId + "/cancel")
+                                    .header(HttpHeaders.AUTHORIZATION, aliceBearer))
+                            .andReturn();
+                    recordCancelOutcome(result.getResponse().getStatus(), successes, conflicts);
+                } catch (Exception exception) {
+                    throw new IllegalStateException(exception);
+                }
+            }));
+            futures.add(pool.submit(() -> {
+                try {
+                    ready.countDown();
+                    if (!start.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("timed out waiting to start");
+                    }
+                    MvcResult result = mockMvc.perform(patch("/api/v1/admin/orders/" + orderId + "/status")
+                                    .header(HttpHeaders.AUTHORIZATION, adminBearer)
+                                    .contentType(APPLICATION_JSON)
+                                    .content("{\"status\":\"CANCELLED\"}"))
+                            .andReturn();
+                    recordCancelOutcome(result.getResponse().getStatus(), successes, conflicts);
+                } catch (Exception exception) {
+                    throw new IllegalStateException(exception);
+                }
+            }));
+
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            for (Future<?> future : futures) {
+                future.get(60, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+            assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+
+        assertThat(successes.get()).isEqualTo(1);
+        assertThat(conflicts.get()).isEqualTo(1);
+        assertThat(orderRepository.findById(orderId).orElseThrow().getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity()).isEqualTo(20);
+    }
+
+    @Test
+    void customerCancelVersusAdminConfirmLeavesConsistentStatusAndStock() throws Exception {
+        User admin = userRepository.saveAndFlush(User.create(
+                "admin-confirm-conc@example.com",
+                "test-only-password-hash",
+                "Root",
+                "Admin",
+                UserRole.ADMIN));
+        String adminBearer = bearer(admin);
+
+        AtomicInteger cancelOk = new AtomicInteger();
+        AtomicInteger confirmOk = new AtomicInteger();
+        AtomicInteger conflicts = new AtomicInteger();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        List<Future<?>> futures = new ArrayList<>();
+
+        try {
+            futures.add(pool.submit(() -> {
+                try {
+                    ready.countDown();
+                    if (!start.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("timed out waiting to start");
+                    }
+                    MvcResult result = mockMvc.perform(post("/api/v1/orders/" + orderId + "/cancel")
+                                    .header(HttpHeaders.AUTHORIZATION, aliceBearer))
+                            .andReturn();
+                    int status = result.getResponse().getStatus();
+                    if (status == 200) {
+                        cancelOk.incrementAndGet();
+                    } else if (status == 409) {
+                        conflicts.incrementAndGet();
+                    } else {
+                        throw new IllegalStateException("unexpected cancel status " + status);
+                    }
+                } catch (Exception exception) {
+                    throw new IllegalStateException(exception);
+                }
+            }));
+            futures.add(pool.submit(() -> {
+                try {
+                    ready.countDown();
+                    if (!start.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("timed out waiting to start");
+                    }
+                    MvcResult result = mockMvc.perform(patch("/api/v1/admin/orders/" + orderId + "/status")
+                                    .header(HttpHeaders.AUTHORIZATION, adminBearer)
+                                    .contentType(APPLICATION_JSON)
+                                    .content("{\"status\":\"CONFIRMED\"}"))
+                            .andReturn();
+                    int status = result.getResponse().getStatus();
+                    if (status == 200) {
+                        confirmOk.incrementAndGet();
+                    } else if (status == 409) {
+                        conflicts.incrementAndGet();
+                    } else {
+                        throw new IllegalStateException("unexpected confirm status " + status);
+                    }
+                } catch (Exception exception) {
+                    throw new IllegalStateException(exception);
+                }
+            }));
+
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            for (Future<?> future : futures) {
+                future.get(60, TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+            assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+
+        assertThat(cancelOk.get() + confirmOk.get()).isEqualTo(1);
+        assertThat(conflicts.get()).isEqualTo(1);
+        OrderStatus status = orderRepository.findById(orderId).orElseThrow().getStatus();
+        int stock = productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity();
+        if (status == OrderStatus.CANCELLED) {
+            assertThat(cancelOk.get()).isEqualTo(1);
+            assertThat(stock).isEqualTo(20);
+        } else {
+            assertThat(status).isEqualTo(OrderStatus.CONFIRMED);
+            assertThat(confirmOk.get()).isEqualTo(1);
+            assertThat(stock).isEqualTo(17);
+        }
+    }
+
+    private static void recordCancelOutcome(int status, AtomicInteger successes, AtomicInteger conflicts) {
+        if (status == 200) {
+            successes.incrementAndGet();
+        } else if (status == 409) {
+            conflicts.incrementAndGet();
+        } else {
+            throw new IllegalStateException("unexpected status " + status);
+        }
     }
 
     private Long checkout(int quantity) throws Exception {

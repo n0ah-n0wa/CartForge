@@ -2,6 +2,7 @@ package com.example.ecommerce.order.controller;
 
 import com.example.ecommerce.common.pagination.PageResponse;
 import com.example.ecommerce.order.dto.CheckoutCommand;
+import com.example.ecommerce.order.dto.CheckoutResult;
 import com.example.ecommerce.order.dto.OrderResponse;
 import com.example.ecommerce.order.dto.OrderSummaryResponse;
 import com.example.ecommerce.order.service.OrderService;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -77,16 +79,25 @@ public class OrderController {
             description = "Creates an order from the authenticated customer's cart in a single "
                     + "transaction: validates active products and stock, snapshots commercial "
                     + "fields onto order lines, decrements inventory, clears the cart, and "
-                    + "commits. Failures roll the entire unit of work back. Idempotency is not "
-                    + "implemented yet.",
+                    + "commits. Failures roll the entire unit of work back. Clients may send "
+                    + "Idempotency-Key; the same user and key replay the original order when "
+                    + "the body is equivalent and never create a second order.",
             security = @SecurityRequirement(name = "bearerAuth"))
+    @ApiResponse(responseCode = "200", description = "Existing order returned for a matching Idempotency-Key")
     @ApiResponse(responseCode = "201", description = "Order created")
-    @ApiResponse(responseCode = "400", description = "Validation failure or inactive product")
+    @ApiResponse(responseCode = "400", description = "Validation failure, inactive product, or invalid Idempotency-Key")
     @ApiResponse(responseCode = "401", description = "Authentication required")
-    @ApiResponse(responseCode = "409", description = "Empty cart, insufficient stock, or inventory conflict")
-    public ResponseEntity<OrderResponse> checkout(@Valid @RequestBody CheckoutCommand command) {
-        OrderResponse body = orderService.checkout(command);
-        return ResponseEntity.created(URI.create("/api/v1/orders/" + body.id())).body(body);
+    @ApiResponse(responseCode = "409", description = "Empty cart, insufficient stock, inventory conflict, or Idempotency-Key reused with a different body")
+    public ResponseEntity<OrderResponse> checkout(
+            @Valid @RequestBody CheckoutCommand command,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        CheckoutResult result = orderService.checkout(command, idempotencyKey);
+        OrderResponse body = result.order();
+        URI location = URI.create("/api/v1/orders/" + body.id());
+        if (result.replayed()) {
+            return ResponseEntity.ok().location(location).body(body);
+        }
+        return ResponseEntity.created(location).body(body);
     }
 
     @PostMapping("/{id}/cancel")

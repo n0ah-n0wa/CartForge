@@ -14,9 +14,9 @@ Use Spring Cache with Redis for product and category reads first. Cache keys are
 
 On cache failure: log a warning and read PostgreSQL. Redis must not be the source of truth.
 
-Redis may also back authentication rate limiting. That use is optional and must fail open if Redis is down, so a cache outage does not take the API offline.
+Redis may also back authentication rate limiting. That use fails open if Redis is down. See [ADR 0008](0008-auth-rate-limiting.md).
 
-Redis must not be the sole store for checkout idempotency. See [ADR 0002](0002-postgresql-source-of-truth.md).
+Redis must not be the sole store for checkout idempotency. See [ADR 0002](0002-postgresql-source-of-truth.md) and [ADR 0007](0007-checkout-idempotency.md).
 
 ## Consequences
 

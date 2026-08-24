@@ -7,8 +7,12 @@ import com.example.ecommerce.cart.service.InvalidCartQuantityException;
 import com.example.ecommerce.inventory.service.InsufficientStockException;
 import com.example.ecommerce.inventory.service.InvalidInventoryQuantityException;
 import com.example.ecommerce.inventory.service.InventoryConflictException;
+import com.example.ecommerce.auth.service.DuplicateEmailException;
+import com.example.ecommerce.auth.service.InvalidCredentialsException;
 import com.example.ecommerce.order.service.EmptyCartException;
+import com.example.ecommerce.order.service.IdempotencyKeyConflictException;
 import com.example.ecommerce.order.service.InactiveProductForCheckoutException;
+import com.example.ecommerce.order.service.InvalidIdempotencyKeyException;
 import com.example.ecommerce.order.service.OrderNotFoundException;
 import com.example.ecommerce.order.service.OrderOwnerNotFoundException;
 import com.example.ecommerce.order.OrderStatusTransitionException;
@@ -39,6 +43,18 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 public class GlobalExceptionHandler {
 
     private static final String PRODUCT_VERSION_CONFLICT_MESSAGE = "The product was modified concurrently";
+
+    @ExceptionHandler(InvalidCredentialsException.class)
+    ResponseEntity<ApiErrorResponse> invalidCredentials(
+            InvalidCredentialsException exception, HttpServletRequest request) {
+        return respond(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(DuplicateEmailException.class)
+    ResponseEntity<ApiErrorResponse> duplicateEmail(
+            DuplicateEmailException exception, HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, "DUPLICATE_EMAIL", exception.getMessage(), request);
+    }
 
     @ExceptionHandler(CategoryNotFoundException.class)
     ResponseEntity<ApiErrorResponse> categoryNotFound(CategoryNotFoundException exception, HttpServletRequest request) {
@@ -91,6 +107,20 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(EmptyCartException.class)
     ResponseEntity<ApiErrorResponse> emptyCart(EmptyCartException exception, HttpServletRequest request) {
         return respond(HttpStatus.CONFLICT, "EMPTY_CART", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(InvalidIdempotencyKeyException.class)
+    ResponseEntity<ApiErrorResponse> invalidIdempotencyKey(
+            InvalidIdempotencyKeyException exception,
+            HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, "IDEMPOTENCY_KEY_INVALID", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(IdempotencyKeyConflictException.class)
+    ResponseEntity<ApiErrorResponse> idempotencyKeyConflict(
+            IdempotencyKeyConflictException exception,
+            HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED", exception.getMessage(), request);
     }
 
     @ExceptionHandler(InactiveProductForCheckoutException.class)

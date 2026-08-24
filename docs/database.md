@@ -1,6 +1,6 @@
 # Database
 
-**Status:** conventions established. Every table in the specified domain model exists: `V1__schema_baseline.sql`, `V2__create_users.sql`, `V3__create_categories.sql`, `V4__create_products.sql`, `V5__create_carts.sql`, and `V6__create_orders.sql`. Checkout, the order-number generator, and the idempotency table are not implemented yet.
+**Status:** conventions established. Domain tables exist through Flyway `V10__checkout_idempotency.sql` (`users`, `categories`, `products`, `carts`, `orders`, `checkout_idempotency_keys`). Checkout, order numbers, and checkout idempotency are implemented.
 
 PostgreSQL is the authoritative persistence layer. Redis must not be treated as durable business state. See [ADR 0002](adr/0002-postgresql-source-of-truth.md) and [ADR 0003](adr/0003-redis-as-cache.md).
 
@@ -271,7 +271,7 @@ Inventory is `Product.stockQuantity`. Internal operations: increase, decrease, r
 
 ## Idempotency records
 
-Order creation should honor `Idempotency-Key` for the same authenticated user. Redis is allowed by the specification as a store, but Redis outage must not break the API. The planned store is a PostgreSQL table written in the same checkout transaction so duplicate submits cannot create two orders when Redis is down.
+Order creation honors `Idempotency-Key` for the same authenticated user. Records live in `checkout_idempotency_keys`, written in the same checkout transaction as the order. A failed checkout inserts nothing. Concurrent retries take a transaction-scoped advisory lock before lookup. See [ADR 0007](adr/0007-checkout-idempotency.md).
 
 ## Seed data
 

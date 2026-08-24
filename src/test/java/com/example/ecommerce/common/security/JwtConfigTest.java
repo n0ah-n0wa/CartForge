@@ -104,6 +104,7 @@ class JwtConfigTest {
         return new ApplicationProperties(
                 new ApplicationProperties.Jwt(secret, 900_000L),
                 new ApplicationProperties.Cors(List.of("http://localhost")),
-                new ApplicationProperties.Pagination(20, 100));
+                new ApplicationProperties.Pagination(20, 100),
+                ApplicationProperties.RateLimit.defaults());
     }
 }

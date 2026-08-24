@@ -192,8 +192,14 @@ class AuthorizationBoundaryIntegrationTest {
 
     @Test
     void registrationAndLoginStayPublic() throws Exception {
-        mockMvc.perform(post("/api/v1/auth/register")).andExpect(status().isNotFound());
-        mockMvc.perform(post("/api/v1/auth/login")).andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
     }
 
     private void assertForbiddenForCustomer(MockHttpServletRequestBuilder request) throws Exception {

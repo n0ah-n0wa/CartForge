@@ -16,7 +16,8 @@ import org.springframework.data.repository.query.Param;
  * The {@code category} association is lazy. Catalog finders declare an entity
  * graph so a page of products still costs one query when the category is rendered.
  */
-public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpecificationExecutor<Product> {
+public interface ProductRepository
+        extends JpaRepository<Product, Long>, JpaSpecificationExecutor<Product>, ProductLockingQueries {
 
     Optional<Product> findBySku(String sku);
 

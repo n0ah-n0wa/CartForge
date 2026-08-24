@@ -130,9 +130,9 @@ Order items store a commercial snapshot (product name, SKU, unit price) so histo
 
 Checkout, cancellation, inventory changes, and necessary administrative status updates run in explicit database transactions.
 
-Checkout must: load the cart, reject an empty cart, verify active products and stock, calculate current prices, create the order and items, decrement inventory, clear the cart, and commit atomically. Optimistic locking on products prevents negative stock under concurrent checkouts.
+Checkout must: load the cart, reject an empty cart, verify active products and stock, calculate current prices, create the order and items, decrement inventory, clear the cart, and commit atomically. Optimistic locking on products prevents negative stock under concurrent checkouts. Optional `Idempotency-Key` replays a committed order for the same user and equivalent body; the key is stored in PostgreSQL in that same transaction.
 
-Redis cache keys must be deterministic (`product:{id}`, `category:{id}`, `products:{query-hash}`). Writes invalidate affected keys. If Redis is unavailable, the application logs a warning and reads PostgreSQL.
+Redis cache keys must be deterministic (`product:{id}`, `category:{id}`, `products:{query-hash}`). Writes invalidate affected keys. If Redis is unavailable, the application logs a warning and reads PostgreSQL. Authentication endpoints use a Redis fixed-window rate limit that fails open if Redis is down; see [ADR 0008](adr/0008-auth-rate-limiting.md).
 
 ## Cross-cutting concerns (specified, not built)
 
@@ -140,8 +140,6 @@ Redis cache keys must be deterministic (`product:{id}`, `category:{id}`, `produc
 - Jakarta Bean Validation at the API edge.
 - Allowlisted sort fields and enforced maximum page size.
 - Request correlation ID (`X-Correlation-ID` or generated).
-- Rate limiting on authentication endpoints.
-- Idempotency key on order creation.
 - Actuator health, readiness, and liveness for Kubernetes.
 - Structured logging without passwords, hashes, JWTs, or authorization headers.
 
