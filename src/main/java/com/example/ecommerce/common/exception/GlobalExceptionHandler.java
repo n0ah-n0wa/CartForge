@@ -3,8 +3,15 @@ package com.example.ecommerce.common.exception;
 import com.example.ecommerce.cart.service.CartItemNotFoundException;
 import com.example.ecommerce.cart.service.CartOwnerNotFoundException;
 import com.example.ecommerce.cart.service.InactiveProductForCartException;
-import com.example.ecommerce.cart.service.InsufficientStockException;
 import com.example.ecommerce.cart.service.InvalidCartQuantityException;
+import com.example.ecommerce.inventory.service.InsufficientStockException;
+import com.example.ecommerce.inventory.service.InvalidInventoryQuantityException;
+import com.example.ecommerce.inventory.service.InventoryConflictException;
+import com.example.ecommerce.order.service.EmptyCartException;
+import com.example.ecommerce.order.service.InactiveProductForCheckoutException;
+import com.example.ecommerce.order.service.OrderNotFoundException;
+import com.example.ecommerce.order.service.OrderOwnerNotFoundException;
+import com.example.ecommerce.order.OrderStatusTransitionException;
 import com.example.ecommerce.category.service.CategoryInUseException;
 import com.example.ecommerce.category.service.CategoryNotFoundException;
 import com.example.ecommerce.category.service.DuplicateCategoryException;
@@ -18,6 +25,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -66,6 +74,51 @@ public class GlobalExceptionHandler {
         return respond(HttpStatus.CONFLICT, "INSUFFICIENT_STOCK", exception.getMessage(), request);
     }
 
+    @ExceptionHandler(InvalidInventoryQuantityException.class)
+    ResponseEntity<ApiErrorResponse> invalidInventoryQuantity(
+            InvalidInventoryQuantityException exception,
+            HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, "INVALID_INVENTORY_QUANTITY", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(InventoryConflictException.class)
+    ResponseEntity<ApiErrorResponse> inventoryConflict(
+            InventoryConflictException exception,
+            HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, "INVENTORY_CONFLICT", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(EmptyCartException.class)
+    ResponseEntity<ApiErrorResponse> emptyCart(EmptyCartException exception, HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, "EMPTY_CART", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(InactiveProductForCheckoutException.class)
+    ResponseEntity<ApiErrorResponse> inactiveProductForCheckout(
+            InactiveProductForCheckoutException exception,
+            HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, "INACTIVE_PRODUCT", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(OrderOwnerNotFoundException.class)
+    ResponseEntity<ApiErrorResponse> orderOwnerNotFound(
+            OrderOwnerNotFoundException exception,
+            HttpServletRequest request) {
+        return respond(HttpStatus.UNAUTHORIZED, "ORDER_OWNER_NOT_FOUND", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(OrderNotFoundException.class)
+    ResponseEntity<ApiErrorResponse> orderNotFound(OrderNotFoundException exception, HttpServletRequest request) {
+        return respond(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND", exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(OrderStatusTransitionException.class)
+    ResponseEntity<ApiErrorResponse> orderStatusTransition(
+            OrderStatusTransitionException exception,
+            HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, "ORDER_STATUS_TRANSITION", exception.getMessage(), request);
+    }
+
     @ExceptionHandler(InvalidCartQuantityException.class)
     ResponseEntity<ApiErrorResponse> invalidCartQuantity(
             InvalidCartQuantityException exception,
@@ -104,6 +157,17 @@ public class GlobalExceptionHandler {
             OptimisticLockingFailureException exception,
             HttpServletRequest request) {
         return respond(HttpStatus.CONFLICT, "PRODUCT_VERSION_CONFLICT", PRODUCT_VERSION_CONFLICT_MESSAGE, request);
+    }
+
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    ResponseEntity<ApiErrorResponse> pessimisticLockingFailure(
+            PessimisticLockingFailureException exception,
+            HttpServletRequest request) {
+        return respond(
+                HttpStatus.CONFLICT,
+                "INVENTORY_CONFLICT",
+                "The resource was modified concurrently",
+                request);
     }
 
     @ExceptionHandler(InvalidProductCategoryException.class)

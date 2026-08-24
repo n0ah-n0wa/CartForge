@@ -17,6 +17,7 @@ import com.example.ecommerce.cart.repository.CartRepository;
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.common.persistence.CurrencyCode;
 import com.example.ecommerce.common.security.CurrentUserProvider;
+import com.example.ecommerce.inventory.service.InsufficientStockException;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.product.repository.ProductRepository;
 import com.example.ecommerce.product.service.ProductNotFoundException;

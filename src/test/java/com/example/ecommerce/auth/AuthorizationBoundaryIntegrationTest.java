@@ -154,14 +154,19 @@ class AuthorizationBoundaryIntegrationTest {
     void aCustomerCannotReachAnyAdministrativeEndpoint() throws Exception {
         assertForbiddenForCustomer(get("/api/v1/admin/orders"));
         assertForbiddenForCustomer(get("/api/v1/admin/orders/1"));
+        assertForbiddenForCustomer(patch("/api/v1/admin/orders/1/status"));
     }
 
     @Test
     void anAdministratorMayReachAdministrativeEndpoints() throws Exception {
         mockMvc.perform(get("/api/v1/admin/orders").header(HttpHeaders.AUTHORIZATION, admin()))
-                .andExpect(status().isNotFound());
-        mockMvc.perform(patch("/api/v1/admin/orders/1/status").header(HttpHeaders.AUTHORIZATION, admin()))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty());
+        mockMvc.perform(patch("/api/v1/admin/orders/1/status")
+                        .header(HttpHeaders.AUTHORIZATION, admin())
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -170,6 +175,7 @@ class AuthorizationBoundaryIntegrationTest {
         mockMvc.perform(post("/api/v1/cart/items")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/orders")).andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/v1/orders")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/orders/1/cancel")).andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -179,7 +185,9 @@ class AuthorizationBoundaryIntegrationTest {
                 .andExpect(jsonPath("$.items").isEmpty())
                 .andExpect(jsonPath("$.totalQuantity").value(0));
         mockMvc.perform(get("/api/v1/orders").header(HttpHeaders.AUTHORIZATION, customer()))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.totalElements").value(0));
     }
 
     @Test

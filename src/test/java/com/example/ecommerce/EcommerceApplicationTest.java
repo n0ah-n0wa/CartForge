@@ -116,14 +116,14 @@ class EcommerceApplicationTest {
     void flywayAppliesTheInfrastructureBaseline() {
         assertThat(environment.getProperty("spring.flyway.enabled")).isEqualTo("true");
         assertThat(flyway.info().current()).isNotNull();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
-        assertThat(flyway.info().current().getDescription()).isEqualTo("categories active index");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
+        assertThat(flyway.info().current().getDescription()).isEqualTo("order number sequence");
         assertThat(flyway.info().current().getState()).isEqualTo(MigrationState.SUCCESS);
 
         List<String> applied = jdbcTemplate.queryForList(
                 "select version from flyway_schema_history where success order by installed_rank",
                 String.class);
-        assertThat(applied).containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
+        assertThat(applied).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
         assertThat(jdbcTemplate.queryForObject(
                         "select obj_description('public'::regnamespace, 'pg_namespace')",
                         String.class))

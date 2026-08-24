@@ -8,6 +8,7 @@ import com.example.ecommerce.cart.mapper.CartMapper;
 import com.example.ecommerce.cart.repository.CartRepository;
 import com.example.ecommerce.common.persistence.PersistenceConventions;
 import com.example.ecommerce.common.security.CurrentUserProvider;
+import com.example.ecommerce.inventory.service.InsufficientStockException;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.product.repository.ProductRepository;
 import com.example.ecommerce.product.service.ProductNotFoundException;

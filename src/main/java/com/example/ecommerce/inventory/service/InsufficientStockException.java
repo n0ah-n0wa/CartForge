@@ -1,5 +1,9 @@
-package com.example.ecommerce.cart.service;
+package com.example.ecommerce.inventory.service;
 
+/**
+ * Raised when a requested stock quantity cannot be satisfied.
+ * Maps to HTTP 409 ({@code INSUFFICIENT_STOCK}).
+ */
 public class InsufficientStockException extends RuntimeException {
 
     private static final long serialVersionUID = 1L;

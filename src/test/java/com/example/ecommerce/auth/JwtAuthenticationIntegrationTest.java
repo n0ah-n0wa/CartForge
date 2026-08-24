@@ -1,6 +1,7 @@
 package com.example.ecommerce.auth;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.ecommerce.auth.dto.AuthenticatedUser;
@@ -83,7 +84,8 @@ class JwtAuthenticationIntegrationTest {
     @Test
     void acceptsAValidToken() throws Exception {
         mockMvc.perform(get(PROTECTED_PATH).header(HttpHeaders.AUTHORIZATION, bearer(customerToken())))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty());
     }
 
     @Test
@@ -123,7 +125,8 @@ class JwtAuthenticationIntegrationTest {
     @Test
     void allowsAdministrativePathsToAnAdministratorToken() throws Exception {
         mockMvc.perform(get(ADMIN_PATH).header(HttpHeaders.AUTHORIZATION, bearer(adminToken())))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty());
     }
 
     @Test

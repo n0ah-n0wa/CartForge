@@ -9,6 +9,8 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
  * The {@code category} association is lazy. Catalog finders declare an entity
@@ -29,6 +31,13 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
     boolean existsBySlugAndIdNot(String slug, Long id);
 
     long countByCategoryId(Long categoryId);
+
+    /**
+     * Bypasses the persistence-context copy so inventory checks see the latest
+     * committed {@code stock_quantity} (and this transaction's own writes).
+     */
+    @Query(value = "select stock_quantity from products where id = :id", nativeQuery = true)
+    Optional<Integer> findStockQuantityById(@Param("id") Long id);
 
     List<Product> findByCategoryId(Long categoryId);
 

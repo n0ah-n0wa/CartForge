@@ -39,6 +39,8 @@ class OrderTest {
         assertThat(item.getUnitPrice()).isEqualByComparingTo("49.50");
         assertThat(item.getQuantity()).isEqualTo(2);
         assertThat(item.getLineTotal()).isEqualByComparingTo("99.00");
+        assertThat(item.getLineTotal().scale()).isEqualTo(2);
+        assertThat(item.getUnitPrice().scale()).isEqualTo(2);
         assertThat(item.getOrder()).isSameAs(order);
     }
 
@@ -67,6 +69,11 @@ class OrderTest {
 
         assertThat(order.getItems()).hasSize(2);
         assertThat(order.getTotalAmount()).isEqualByComparingTo("129.15");
+        assertThat(order.getTotalAmount().scale()).isEqualTo(2);
+        assertThat(order.getTotalAmount())
+                .isEqualByComparingTo(order.getItems().stream()
+                        .map(OrderItem::getLineTotal)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add));
     }
 
     @Test

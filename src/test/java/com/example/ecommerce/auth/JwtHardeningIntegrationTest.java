@@ -119,7 +119,8 @@ class JwtHardeningIntegrationTest {
                 + now.getEpochSecond() + ",\"exp\":" + now.plusSeconds(600).getEpochSecond() + "}");
 
         mockMvc.perform(get(PROTECTED_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + complete))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty());
     }
 
     @Test
@@ -157,7 +158,8 @@ class JwtHardeningIntegrationTest {
                 .expiresAt(Instant.now().plusSeconds(600)));
 
         mockMvc.perform(get(PROTECTED_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + complete))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty());
     }
 
     @Test

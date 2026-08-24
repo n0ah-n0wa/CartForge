@@ -11,6 +11,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Objects;
 
 /**
@@ -70,7 +71,9 @@ public class OrderItem extends BaseEntity {
         item.sku = product.getSku();
         item.unitPrice = product.getPrice();
         item.quantity = requirePositive(quantity);
-        item.lineTotal = item.unitPrice.multiply(BigDecimal.valueOf(item.quantity));
+        item.lineTotal = item.unitPrice
+                .multiply(BigDecimal.valueOf(item.quantity))
+                .setScale(PersistenceConventions.MONEY_SCALE, RoundingMode.UNNECESSARY);
         return item;
     }
 

@@ -7,6 +7,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 /**
  * Customer-facing reads are scoped by owner id so a customer can never read
@@ -14,7 +15,10 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * finders; combining a collection graph with {@code Pageable} would paginate
  * in memory.
  */
-public interface OrderRepository extends JpaRepository<Order, Long> {
+public interface OrderRepository extends JpaRepository<Order, Long>, OrderLockingQueries {
+
+    @Query(value = "select nextval('order_number_seq')", nativeQuery = true)
+    long nextOrderNumberSequence();
 
     Optional<Order> findByOrderNumber(String orderNumber);
 
@@ -33,4 +37,10 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     @EntityGraph(attributePaths = "items")
     Optional<Order> findWithItemsByOrderNumberAndUserId(String orderNumber, Long userId);
+
+    @EntityGraph(attributePaths = "items")
+    Optional<Order> findWithItemsByIdAndUserId(Long id, Long userId);
+
+    @EntityGraph(attributePaths = "items")
+    Optional<Order> findWithItemsById(Long id);
 }
