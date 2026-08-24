@@ -28,10 +28,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Proves the authorization boundary the specification requires. Business
- * controllers do not exist yet, so a permitted request ends in 404 — which is
- * itself the signal that security let it through, because a denied one is
- * answered by the filter chain with 401 or 403.
+ * Proves the authorization matcher boundary. Controllers exist; a permitted
+ * write with an empty body ends in validation 400, and a permitted delete of a
+ * missing resource ends in domain 404 — both prove the filter chain authorized
+ * the call (a denied call is 401/403 before the controller).
  */
 @SpringBootTest(
         properties = {
@@ -97,10 +97,15 @@ class AuthorizationBoundaryIntegrationTest {
 
     @Test
     void anAdministratorMayWriteToTheCatalog() throws Exception {
-        mockMvc.perform(post("/api/v1/products").header(HttpHeaders.AUTHORIZATION, admin()))
-                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, admin())
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
         mockMvc.perform(delete("/api/v1/categories/1").header(HttpHeaders.AUTHORIZATION, admin()))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("CATEGORY_NOT_FOUND"));
     }
 
     @Test
@@ -167,6 +172,13 @@ class AuthorizationBoundaryIntegrationTest {
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void swaggerAndOpenApiAreNotPublicOnTheTestProfile() throws Exception {
+        mockMvc.perform(get("/swagger-ui.html")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/swagger-ui/index.html")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/v3/api-docs")).andExpect(status().isUnauthorized());
     }
 
     @Test

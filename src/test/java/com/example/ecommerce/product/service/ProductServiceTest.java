@@ -167,6 +167,99 @@ class ProductServiceTest {
     }
 
     @Test
+    void createRejectsDuplicateSlug() {
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(Category.create("Books", "books", null)));
+        when(productRepository.existsBySku("KB-001")).thenReturn(false);
+        when(productRepository.existsBySlug("keyboard")).thenReturn(true);
+
+        assertThatThrownBy(() -> productService.create(createCommand(1L)))
+                .isInstanceOf(DuplicateProductException.class)
+                .extracting(ex -> ((DuplicateProductException) ex).code())
+                .isEqualTo("DUPLICATE_PRODUCT_SLUG");
+    }
+
+    @Test
+    void updateRejectsDuplicateSlug() {
+        Product product = product(Category.create("Books", "books", null), 0L);
+        ReflectionTestUtils.setField(product, "id", 8L);
+        when(productRepository.findWithCategoryById(8L)).thenReturn(Optional.of(product));
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(Category.create("Books", "books", null)));
+        when(productRepository.existsBySlugAndIdNot("other-slug", 8L)).thenReturn(true);
+
+        assertThatThrownBy(() -> productService.update(
+                        8L,
+                        new UpdateProductCommand(
+                                0L,
+                                "Keyboard",
+                                "other-slug",
+                                null,
+                                new BigDecimal("10.00"),
+                                CurrencyCode.EUR,
+                                1,
+                                1L,
+                                true)))
+                .isInstanceOf(DuplicateProductException.class)
+                .extracting(ex -> ((DuplicateProductException) ex).code())
+                .isEqualTo("DUPLICATE_PRODUCT_SLUG");
+    }
+
+    @Test
+    void updateRejectsAMissingVersion() {
+        Product product = product(Category.create("Books", "books", null), 0L);
+        when(productRepository.findWithCategoryById(8L)).thenReturn(Optional.of(product));
+
+        assertThatThrownBy(() -> productService.update(
+                        8L,
+                        new UpdateProductCommand(
+                                null,
+                                "Keyboard",
+                                "keyboard",
+                                null,
+                                new BigDecimal("10.00"),
+                                CurrencyCode.EUR,
+                                1,
+                                1L,
+                                true)))
+                .isInstanceOf(ProductVersionConflictException.class);
+        verify(productRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void flushOptimisticLockIsMappedToAProductVersionConflict() {
+        Product product = product(Category.create("Books", "books", null), 0L);
+        ReflectionTestUtils.setField(product, "id", 8L);
+        when(productRepository.findWithCategoryById(8L)).thenReturn(Optional.of(product));
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(Category.create("Books", "books", null)));
+        when(productRepository.existsBySlugAndIdNot("keyboard", 8L)).thenReturn(false);
+        when(productRepository.saveAndFlush(product))
+                .thenThrow(new org.springframework.dao.OptimisticLockingFailureException("stale"));
+
+        assertThatThrownBy(() -> productService.update(
+                        8L,
+                        new UpdateProductCommand(
+                                0L,
+                                "Keyboard",
+                                "keyboard",
+                                null,
+                                new BigDecimal("10.00"),
+                                CurrencyCode.EUR,
+                                1,
+                                1L,
+                                true)))
+                .isInstanceOf(ProductVersionConflictException.class);
+    }
+
+    @Test
+    void deactivateRejectsAMissingVersion() {
+        Product product = product(Category.create("Books", "books", null), 0L);
+        when(productRepository.findWithCategoryById(8L)).thenReturn(Optional.of(product));
+
+        assertThatThrownBy(() -> productService.deactivate(8L, null))
+                .isInstanceOf(ProductVersionConflictException.class);
+        verify(productRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
     void updateRejectsStaleVersion() {
         Product product = product(Category.create("Books", "books", null), 0L);
         when(productRepository.findWithCategoryById(8L)).thenReturn(Optional.of(product));

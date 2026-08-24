@@ -167,7 +167,7 @@ Images must not embed secrets.
 
 ## Actuator and HTTP hardening
 
-- Expose only Actuator endpoints that are safe and necessary: `health` and `prometheus`. `env`, `beans`, `configprops`, `heapdump`, `threaddump`, `mappings`, and `shutdown` are disabled.
+- Expose only Actuator endpoints that are safe and necessary: `health` and `prometheus`. `env`, `beans`, `configprops`, `heapdump`, `threaddump`, `mappings`, and `shutdown` are disabled in configuration, and any other `/actuator/**` path is `denyAll` in Spring Security so a misconfiguration that re-enables them cannot expose them. Anonymous callers receive 401; authenticated non-admin callers receive 403.
 - Production must not expose sensitive environment information. Health responses use `show-details: never` and `show-components: never`. Redis health is fail-open (`available` true/false) so a Redis outage does not mark the process DOWN.
 - Kubernetes probes use `/actuator/health/readiness` (process + PostgreSQL) and `/actuator/health/liveness` (process only). `/actuator/prometheus` is scrapeable without a JWT and must be network-restricted.
 - Use secure HTTP headers where applicable. Spring Security's defaults are enabled (`X-Content-Type-Options`, `X-Frame-Options: DENY`, `Cache-Control`).

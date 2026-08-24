@@ -15,6 +15,7 @@ import com.example.ecommerce.auth.service.JwtTokenService;
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.category.repository.CategoryRepository;
 import com.example.ecommerce.common.persistence.CurrencyCode;
+import com.example.ecommerce.common.support.IntegrationTestContainers;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.product.repository.ProductRepository;
 import com.example.ecommerce.user.UserRole;
@@ -29,12 +30,14 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
+/**
+ * Product HTTP contracts against real PostgreSQL. Commits are real (no class-level
+ * {@code @Transactional}) so optimistic-lock version bumps are visible across requests.
+ */
 @SpringBootTest(
         properties = {
             "spring.cache.type=simple",
@@ -45,21 +48,14 @@ import org.testcontainers.utility.DockerImageName;
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Testcontainers
-@Transactional
 class ProductApiIntegrationTest {
 
     @Container
-    static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>(DockerImageName.parse("postgres:16-alpine"));
+    static final PostgreSQLContainer<?> POSTGRES = IntegrationTestContainers.postgres();
 
     @DynamicPropertySource
     static void registerInfrastructure(DynamicPropertyRegistry registry) {
-        registry.add("DATABASE_URL", POSTGRES::getJdbcUrl);
-        registry.add("DATABASE_USERNAME", POSTGRES::getUsername);
-        registry.add("DATABASE_PASSWORD", POSTGRES::getPassword);
-        registry.add("REDIS_URL", () -> "redis://localhost:6379");
-        registry.add("JWT_SECRET", () -> "test-only-jwt-secret-not-for-production");
-        registry.add("CORS_ORIGINS", () -> "http://localhost");
+        IntegrationTestContainers.registerPostgresWithoutRedis(registry, POSTGRES);
     }
 
     @Autowired

@@ -1,5 +1,6 @@
 package com.example.ecommerce.auth;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -244,13 +245,22 @@ class JwtHardeningIntegrationTest {
                 .issuedAt(issuedAt)
                 .expiresAt(issuedAt.plusSeconds(60)));
 
-        mockMvc.perform(get(PROTECTED_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + expired))
+        String body = mockMvc.perform(get(PROTECTED_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + expired))
                 .andExpect(status().isUnauthorized())
                 .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer"))
                 .andExpect(jsonPath("$.status").value(401))
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
                 .andExpect(jsonPath("$.message").value("Authentication is required"))
-                .andExpect(jsonPath("$.path").value(PROTECTED_PATH));
+                .andExpect(jsonPath("$.path").value(PROTECTED_PATH))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(body)
+                .doesNotContain(expired)
+                .doesNotContain("eyJ")
+                .doesNotContain("stackTrace")
+                .doesNotContain("JwtException");
     }
 
     @Test

@@ -6,6 +6,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -16,6 +18,7 @@ import com.example.ecommerce.common.pagination.InvalidSortException;
 import com.example.ecommerce.common.pagination.PageResponse;
 import com.example.ecommerce.common.persistence.CurrencyCode;
 import com.example.ecommerce.inventory.dto.StockLevel;
+import com.example.ecommerce.inventory.service.InventoryConflictException;
 import com.example.ecommerce.inventory.service.InventoryService;
 import com.example.ecommerce.order.OrderStatus;
 import com.example.ecommerce.order.OrderStatusTransitionException;
@@ -162,6 +165,49 @@ class AdminOrderServiceTest {
     }
 
     @Test
+    void updateStatusToCancelledDoesNotPersistWhenInventoryRestoreFails() {
+        Order order = pendingOrder(1);
+        when(orderRepository.findWithItemsByIdForUpdate(ORDER_ID)).thenReturn(Optional.of(order));
+        doThrow(new InventoryConflictException(PRODUCT_ID)).when(inventoryService).restoreStock(PRODUCT_ID, 1);
+
+        assertThatThrownBy(() -> adminOrderService.updateStatus(
+                        ORDER_ID, new UpdateOrderStatusCommand(OrderStatus.CANCELLED)))
+                .isInstanceOf(InventoryConflictException.class);
+
+        verify(orderRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void updateStatusToCancelledRestoresEveryLineInProductIdOrder() {
+        Order order = twoLineOrder();
+        when(orderRepository.findWithItemsByIdForUpdate(ORDER_ID)).thenReturn(Optional.of(order));
+        when(inventoryService.restoreStock(99L, 1)).thenReturn(new StockLevel(99L, 5, 1L));
+        when(inventoryService.restoreStock(PRODUCT_ID, 2)).thenReturn(new StockLevel(PRODUCT_ID, 12, 1L));
+        when(orderRepository.saveAndFlush(order)).thenAnswer(invocation -> invocation.getArgument(0));
+
+        adminOrderService.updateStatus(ORDER_ID, new UpdateOrderStatusCommand(OrderStatus.CANCELLED));
+
+        var orderVerifier = inOrder(inventoryService);
+        orderVerifier.verify(inventoryService).restoreStock(PRODUCT_ID, 2);
+        orderVerifier.verify(inventoryService).restoreStock(99L, 1);
+    }
+
+    @Test
+    void cancellingAConfirmedOrderRestoresInventory() {
+        Order order = pendingOrder(2);
+        order.transitionTo(OrderStatus.CONFIRMED);
+        when(orderRepository.findWithItemsByIdForUpdate(ORDER_ID)).thenReturn(Optional.of(order));
+        when(inventoryService.restoreStock(PRODUCT_ID, 2)).thenReturn(new StockLevel(PRODUCT_ID, 12, 1L));
+        when(orderRepository.saveAndFlush(order)).thenAnswer(invocation -> invocation.getArgument(0));
+
+        OrderResponse response = adminOrderService.updateStatus(
+                ORDER_ID, new UpdateOrderStatusCommand(OrderStatus.CANCELLED));
+
+        assertThat(response.status()).isEqualTo(OrderStatus.CANCELLED);
+        verify(inventoryService).restoreStock(PRODUCT_ID, 2);
+    }
+
+    @Test
     void updateStatusRejectsInvalidLifecycleTransitions() {
         Order order = pendingOrder(1);
         order.transitionTo(OrderStatus.CONFIRMED);
@@ -202,6 +248,23 @@ class AdminOrderServiceTest {
         ReflectionTestUtils.setField(keyboard, "version", 0L);
         Order order = Order.place("ORD-2026-000700", customer, "1 Main Street", CurrencyCode.EUR);
         order.addItem(keyboard, quantity);
+        ReflectionTestUtils.setField(order, "id", ORDER_ID);
+        return order;
+    }
+
+    private static Order twoLineOrder() {
+        User customer = User.registerCustomer(
+                "customer@example.com", "test-only-password-hash", "Ada", "Lovelace");
+        ReflectionTestUtils.setField(customer, "id", 11L);
+        Product keyboard = Product.create(
+                "KB-001", "Keyboard", "keyboard", null, new BigDecimal("49.50"), null, 10, CATEGORY);
+        ReflectionTestUtils.setField(keyboard, "id", PRODUCT_ID);
+        Product mouse = Product.create(
+                "MS-001", "Mouse", "mouse", null, new BigDecimal("10.00"), null, 5, CATEGORY);
+        ReflectionTestUtils.setField(mouse, "id", 99L);
+        Order order = Order.place("ORD-2026-000700", customer, "1 Main Street", CurrencyCode.EUR);
+        order.addItem(mouse, 1);
+        order.addItem(keyboard, 2);
         ReflectionTestUtils.setField(order, "id", ORDER_ID);
         return order;
     }

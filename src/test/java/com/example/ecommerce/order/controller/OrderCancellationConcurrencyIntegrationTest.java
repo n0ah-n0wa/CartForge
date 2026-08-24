@@ -255,6 +255,11 @@ class OrderCancellationConcurrencyIntegrationTest {
         assertThat(productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity()).isEqualTo(20);
     }
 
+    /**
+     * PENDING can become CONFIRMED or CANCELLED. Confirm then cancel is also
+     * allowed (CONFIRMED is still cancellable), so both requests may return 200
+     * when they serialize that way. The invariant is the final status and stock.
+     */
     @Test
     void customerCancelVersusAdminConfirmLeavesConsistentStatusAndStock() throws Exception {
         User admin = userRepository.saveAndFlush(User.create(
@@ -329,8 +334,9 @@ class OrderCancellationConcurrencyIntegrationTest {
             assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
         }
 
-        assertThat(cancelOk.get() + confirmOk.get()).isEqualTo(1);
-        assertThat(conflicts.get()).isEqualTo(1);
+        assertThat(cancelOk.get() + confirmOk.get()).isBetween(1, 2);
+        assertThat(cancelOk.get() + confirmOk.get() + conflicts.get()).isEqualTo(2);
+
         OrderStatus status = orderRepository.findById(orderId).orElseThrow().getStatus();
         int stock = productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity();
         if (status == OrderStatus.CANCELLED) {
@@ -339,6 +345,7 @@ class OrderCancellationConcurrencyIntegrationTest {
         } else {
             assertThat(status).isEqualTo(OrderStatus.CONFIRMED);
             assertThat(confirmOk.get()).isEqualTo(1);
+            assertThat(cancelOk.get()).isZero();
             assertThat(stock).isEqualTo(17);
         }
     }

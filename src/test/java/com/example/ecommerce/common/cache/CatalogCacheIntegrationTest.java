@@ -196,6 +196,29 @@ class CatalogCacheIntegrationTest {
     }
 
     @Test
+    void categoryDeactivationClearsCategoryListAndProductCaches() {
+        Product product = productService.create(new CreateProductCommand(
+                "KB-500",
+                "Keyboard",
+                "keyboard-deact",
+                null,
+                new BigDecimal("15.00"),
+                CurrencyCode.EUR,
+                1,
+                books.getId()));
+        productService.getResponse(product.getId(), false);
+        categoryService.listActiveResponses();
+        assertThat(productCache().get(product.getId())).isNotNull();
+        assertThat(categoriesCache().get(CatalogCaches.ACTIVE_LIST_KEY)).isNotNull();
+
+        categoryService.patch(books.getId(), new PatchCategoryCommand(null, null, null, false));
+
+        assertThat(categoriesCache().get(CatalogCaches.ACTIVE_LIST_KEY)).isNull();
+        assertThat(productCache().get(product.getId())).isNull();
+        assertThat(categoryService.listActiveResponses()).isEmpty();
+    }
+
+    @Test
     void adminInactiveLookupBypassesPublicProductCache() {
         Product created = productService.create(new CreateProductCommand(
                 "KB-400",

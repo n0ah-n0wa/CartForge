@@ -15,6 +15,8 @@ import com.example.ecommerce.cart.repository.CartRepository;
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.category.repository.CategoryRepository;
 import com.example.ecommerce.common.persistence.CurrencyCode;
+import com.example.ecommerce.common.support.IntegrationTestContainers;
+import com.example.ecommerce.order.repository.CheckoutIdempotencyKeyRepository;
 import com.example.ecommerce.order.repository.OrderItemRepository;
 import com.example.ecommerce.order.repository.OrderRepository;
 import com.example.ecommerce.product.entity.Product;
@@ -35,7 +37,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 /**
  * Checkout commits in real transactions (no class-level {@code @Transactional})
@@ -54,17 +55,11 @@ import org.testcontainers.utility.DockerImageName;
 class CheckoutApiIntegrationTest {
 
     @Container
-    static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>(DockerImageName.parse("postgres:16-alpine"));
+    static final PostgreSQLContainer<?> POSTGRES = IntegrationTestContainers.postgres();
 
     @DynamicPropertySource
     static void registerInfrastructure(DynamicPropertyRegistry registry) {
-        registry.add("DATABASE_URL", POSTGRES::getJdbcUrl);
-        registry.add("DATABASE_USERNAME", POSTGRES::getUsername);
-        registry.add("DATABASE_PASSWORD", POSTGRES::getPassword);
-        registry.add("REDIS_URL", () -> "redis://localhost:6379");
-        registry.add("JWT_SECRET", () -> "test-only-jwt-secret-not-for-production");
-        registry.add("CORS_ORIGINS", () -> "http://localhost");
+        IntegrationTestContainers.registerPostgresWithoutRedis(registry, POSTGRES);
     }
 
     @Autowired
@@ -94,6 +89,9 @@ class CheckoutApiIntegrationTest {
     @Autowired
     private OrderItemRepository orderItemRepository;
 
+    @Autowired
+    private CheckoutIdempotencyKeyRepository checkoutIdempotencyKeyRepository;
+
     private User alice;
     private Product keyboard;
     private Product mouse;
@@ -101,6 +99,7 @@ class CheckoutApiIntegrationTest {
     @BeforeEach
     void setUp() {
         orderItemRepository.deleteAll();
+        checkoutIdempotencyKeyRepository.deleteAll();
         orderRepository.deleteAll();
         cartItemRepository.deleteAll();
         cartRepository.deleteAll();

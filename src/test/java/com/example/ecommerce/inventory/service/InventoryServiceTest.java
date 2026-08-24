@@ -19,13 +19,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 class InventoryServiceTest {
 
     private static final long PRODUCT_ID = 42L;
@@ -43,7 +40,7 @@ class InventoryServiceTest {
 
     @Test
     void increaseStockAddsToAvailableQuantity() {
-        Product product = readyProduct(5);
+        Product product = readyProductForMutation(5);
         when(productRepository.saveAndFlush(product)).thenAnswer(invocation -> invocation.getArgument(0));
 
         StockLevel level = inventoryService.increaseStock(PRODUCT_ID, 3);
@@ -56,7 +53,7 @@ class InventoryServiceTest {
 
     @Test
     void decreaseStockSubtractsWhenSufficient() {
-        Product product = readyProduct(5);
+        Product product = readyProductForMutation(5);
         when(productRepository.saveAndFlush(product)).thenAnswer(invocation -> invocation.getArgument(0));
 
         StockLevel level = inventoryService.decreaseStock(PRODUCT_ID, 2);
@@ -67,7 +64,7 @@ class InventoryServiceTest {
 
     @Test
     void decreaseStockRejectsWhenInsufficient() {
-        Product product = readyProduct(2);
+        Product product = readyProductForMutation(2);
 
         assertThatThrownBy(() -> inventoryService.decreaseStock(PRODUCT_ID, 3))
                 .isInstanceOf(InsufficientStockException.class)
@@ -84,7 +81,7 @@ class InventoryServiceTest {
 
     @Test
     void decreaseStockToZeroIsAllowed() {
-        Product product = readyProduct(2);
+        Product product = readyProductForMutation(2);
         when(productRepository.saveAndFlush(product)).thenAnswer(invocation -> invocation.getArgument(0));
 
         StockLevel level = inventoryService.decreaseStock(PRODUCT_ID, 2);
@@ -95,7 +92,7 @@ class InventoryServiceTest {
 
     @Test
     void restoreStockIncreasesQuantity() {
-        Product product = readyProduct(1);
+        Product product = readyProductForMutation(1);
         when(productRepository.saveAndFlush(product)).thenAnswer(invocation -> invocation.getArgument(0));
 
         StockLevel level = inventoryService.restoreStock(PRODUCT_ID, 4);
@@ -105,7 +102,7 @@ class InventoryServiceTest {
 
     @Test
     void validateAvailabilitySucceedsWhenStockCoversRequest() {
-        readyProduct(5);
+        readyProductForRead(5);
 
         inventoryService.validateAvailability(PRODUCT_ID, 5);
 
@@ -114,10 +111,36 @@ class InventoryServiceTest {
 
     @Test
     void validateAvailabilityFailsWhenStockIsShort() {
-        readyProduct(1);
+        readyProductForRead(1);
 
         assertThatThrownBy(() -> inventoryService.validateAvailability(PRODUCT_ID, 2))
                 .isInstanceOf(InsufficientStockException.class);
+        verify(productRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void validateAvailabilityUsesCommittedStockWhenPersistenceContextIsStale() {
+        // Entity in the PC reports 1 unit, but the dedicated stock query sees 5.
+        Product stale = productWithStock(1);
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(stale));
+        when(productRepository.findStockQuantityById(PRODUCT_ID)).thenReturn(Optional.of(5));
+
+        inventoryService.validateAvailability(PRODUCT_ID, 5);
+
+        verify(productRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void validateAvailabilityRejectsUsingCommittedStockWhenPersistenceContextIsStale() {
+        // Entity in the PC reports plenty; committed stock is already zero.
+        Product stale = productWithStock(10);
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(stale));
+        when(productRepository.findStockQuantityById(PRODUCT_ID)).thenReturn(Optional.of(0));
+
+        assertThatThrownBy(() -> inventoryService.validateAvailability(PRODUCT_ID, 1))
+                .isInstanceOf(InsufficientStockException.class)
+                .satisfies(ex -> assertThat(((InsufficientStockException) ex).getAvailable()).isZero());
+
         verify(productRepository, never()).saveAndFlush(any());
     }
 
@@ -149,7 +172,7 @@ class InventoryServiceTest {
 
     @Test
     void optimisticLockFailureBecomesInventoryConflict() {
-        Product product = readyProduct(5);
+        Product product = readyProductForMutation(5);
         when(productRepository.saveAndFlush(product))
                 .thenThrow(new OptimisticLockingFailureException("stale version"));
 
@@ -159,9 +182,11 @@ class InventoryServiceTest {
     }
 
     @Test
-    void getStockLevelReturnsCurrentSnapshot() {
-        Product product = readyProduct(7);
-        ReflectionTestUtils.setField(product, "version", 3L);
+    void getStockLevelReturnsCommittedStockNotStaleEntityQuantity() {
+        Product stale = productWithStock(1);
+        ReflectionTestUtils.setField(stale, "version", 3L);
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(stale));
+        when(productRepository.findStockQuantityById(PRODUCT_ID)).thenReturn(Optional.of(7));
 
         StockLevel level = inventoryService.getStockLevel(PRODUCT_ID);
 
@@ -169,33 +194,14 @@ class InventoryServiceTest {
         verify(productRepository, never()).saveAndFlush(any());
     }
 
-    @Test
-    void decreaseStockUsesDatabaseQuantityWhenTheLoadedEntityIsStale() {
-        Product product = productWithStock(1);
-        when(productRepository.findByIdForUpdate(PRODUCT_ID)).thenReturn(Optional.of(product));
-        when(productRepository.saveAndFlush(product)).thenAnswer(invocation -> invocation.getArgument(0));
-
-        StockLevel level = inventoryService.decreaseStock(PRODUCT_ID, 1);
-
-        assertThat(level.stockQuantity()).isZero();
-        assertThat(product.getStockQuantity()).isZero();
-    }
-
-    @Test
-    void decreaseStockRejectsUsingDatabaseQuantityWhenTheLoadedEntityIsStale() {
-        Product product = productWithStock(0);
-        when(productRepository.findByIdForUpdate(PRODUCT_ID)).thenReturn(Optional.of(product));
-
-        assertThatThrownBy(() -> inventoryService.decreaseStock(PRODUCT_ID, 1))
-                .isInstanceOf(InsufficientStockException.class)
-                .satisfies(ex -> assertThat(((InsufficientStockException) ex).getAvailable()).isZero());
-
-        verify(productRepository, never()).saveAndFlush(any());
-    }
-
-    private Product readyProduct(int stock) {
+    private Product readyProductForMutation(int stock) {
         Product product = productWithStock(stock);
         when(productRepository.findByIdForUpdate(PRODUCT_ID)).thenReturn(Optional.of(product));
+        return product;
+    }
+
+    private Product readyProductForRead(int stock) {
+        Product product = productWithStock(stock);
         when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product));
         when(productRepository.findStockQuantityById(PRODUCT_ID)).thenReturn(Optional.of(stock));
         return product;

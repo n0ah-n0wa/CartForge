@@ -5,15 +5,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 
+import com.example.ecommerce.cart.entity.Cart;
+import com.example.ecommerce.cart.repository.CartItemRepository;
+import com.example.ecommerce.cart.repository.CartRepository;
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.category.repository.CategoryRepository;
 import com.example.ecommerce.common.persistence.CurrencyCode;
 import com.example.ecommerce.common.security.JwtClaims;
 import com.example.ecommerce.common.support.IntegrationTestContainers;
-import com.example.ecommerce.inventory.service.InventoryConflictException;
+import com.example.ecommerce.inventory.service.InsufficientStockException;
 import com.example.ecommerce.inventory.service.InventoryService;
-import com.example.ecommerce.order.OrderStatus;
-import com.example.ecommerce.order.entity.Order;
+import com.example.ecommerce.order.dto.CheckoutCommand;
+import com.example.ecommerce.order.repository.CheckoutIdempotencyKeyRepository;
 import com.example.ecommerce.order.repository.OrderItemRepository;
 import com.example.ecommerce.order.repository.OrderRepository;
 import com.example.ecommerce.order.service.OrderService;
@@ -27,7 +30,6 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.SpyBean;
@@ -43,9 +45,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Customer cancellation commits or rolls back against real PostgreSQL inventory.
- * The failure path only stubs {@code restoreStock} so the status transition is
- * rolled back by the database transaction, not by a fully mocked inventory bean.
+ * Mid-checkout failure must roll back the whole unit against real PostgreSQL:
+ * the first stock decrement is a real inventory write; only the second call is
+ * forced to fail so the transaction boundary (not a mocked inventory service)
+ * is what restores catalog stock and leaves the cart untouched.
  */
 @SpringBootTest(
         properties = {
@@ -56,7 +59,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         })
 @ActiveProfiles("test")
 @Testcontainers
-class OrderCancellationTransactionIntegrationTest {
+class CheckoutTransactionIntegrationTest {
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES = IntegrationTestContainers.postgres();
@@ -66,6 +69,10 @@ class OrderCancellationTransactionIntegrationTest {
         IntegrationTestContainers.registerPostgresWithoutRedis(registry, POSTGRES);
     }
 
+    /**
+     * Spy only injects the second-line failure. Validation and the first
+     * {@code decreaseStock} still hit PostgreSQL through the real service.
+     */
     @SpyBean
     private InventoryService inventoryService;
 
@@ -79,6 +86,15 @@ class OrderCancellationTransactionIntegrationTest {
     private OrderItemRepository orderItemRepository;
 
     @Autowired
+    private CheckoutIdempotencyKeyRepository checkoutIdempotencyKeyRepository;
+
+    @Autowired
+    private CartRepository cartRepository;
+
+    @Autowired
+    private CartItemRepository cartItemRepository;
+
+    @Autowired
     private UserRepository userRepository;
 
     @Autowired
@@ -90,29 +106,30 @@ class OrderCancellationTransactionIntegrationTest {
     private User customer;
     private Product keyboard;
     private Product mouse;
-    private Long orderId;
 
     @BeforeEach
     void setUp() {
-        Mockito.reset(inventoryService);
         orderItemRepository.deleteAll();
+        checkoutIdempotencyKeyRepository.deleteAll();
         orderRepository.deleteAll();
+        cartItemRepository.deleteAll();
+        cartRepository.deleteAll();
         productRepository.deleteAll();
         categoryRepository.deleteAll();
         userRepository.deleteAll();
 
         Category books = categoryRepository.saveAndFlush(Category.create("Books", "books", null));
         customer = userRepository.saveAndFlush(
-                User.registerCustomer("txn@example.com", "test-only-password-hash", "Txn", "Customer"));
+                User.registerCustomer("checkout-txn@example.com", "test-only-password-hash", "Txn", "Customer"));
         keyboard = productRepository.saveAndFlush(Product.create(
-                "KB-TXN", "Keyboard", "keyboard-txn", null, new BigDecimal("49.50"), CurrencyCode.EUR, 8, books));
+                "KB-TXN2", "Keyboard", "keyboard-txn2", null, new BigDecimal("49.50"), CurrencyCode.EUR, 8, books));
         mouse = productRepository.saveAndFlush(Product.create(
-                "MS-TXN", "Mouse", "mouse-txn", null, new BigDecimal("10.00"), CurrencyCode.EUR, 5, books));
+                "MS-TXN2", "Mouse", "mouse-txn2", null, new BigDecimal("10.00"), CurrencyCode.EUR, 5, books));
 
-        Order order = Order.place("ORD-2026-009999", customer, "1 Main Street", CurrencyCode.EUR);
-        order.addItem(keyboard, 2);
-        order.addItem(mouse, 1);
-        orderId = orderRepository.saveAndFlush(order).getId();
+        Cart cart = Cart.forUser(customer);
+        cart.addOrIncrease(keyboard, 1);
+        cart.addOrIncrease(mouse, 1);
+        cartRepository.saveAndFlush(cart);
         authenticate(customer);
     }
 
@@ -122,43 +139,20 @@ class OrderCancellationTransactionIntegrationTest {
     }
 
     @Test
-    void rollsBackUncancelledOrderWhenInventoryRestoreFails() {
-        doThrow(new InventoryConflictException(keyboard.getId()))
+    void rollsBackCheckoutWhenTheSecondStockDecrementFails() {
+        doThrow(new InsufficientStockException(mouse.getId(), 0, 1))
                 .when(inventoryService)
-                .restoreStock(eq(keyboard.getId()), eq(2));
+                .decreaseStock(eq(mouse.getId()), eq(1));
 
-        assertThatThrownBy(() -> orderService.cancelOrder(orderId))
-                .isInstanceOf(InventoryConflictException.class);
+        assertThatThrownBy(() -> orderService.checkout(new CheckoutCommand("1 Main Street")))
+                .isInstanceOf(InsufficientStockException.class);
 
-        Order reloaded = orderRepository.findById(orderId).orElseThrow();
-        assertThat(reloaded.getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(orderRepository.count()).isZero();
+        assertThat(checkoutIdempotencyKeyRepository.count()).isZero();
+        Cart cart = cartRepository.findWithItemsByUserId(customer.getId()).orElseThrow();
+        assertThat(cart.getItems()).hasSize(2);
         assertThat(productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity()).isEqualTo(8);
         assertThat(productRepository.findById(mouse.getId()).orElseThrow().getStockQuantity()).isEqualTo(5);
-    }
-
-    @Test
-    void rollsBackWhenSecondLineInventoryRestoreFailsAfterFirstLineSucceeded() {
-        // First restore (keyboard) is real; second (mouse) fails so no partial restock.
-        doThrow(new InventoryConflictException(mouse.getId()))
-                .when(inventoryService)
-                .restoreStock(eq(mouse.getId()), eq(1));
-
-        assertThatThrownBy(() -> orderService.cancelOrder(orderId))
-                .isInstanceOf(InventoryConflictException.class);
-
-        Order reloaded = orderRepository.findById(orderId).orElseThrow();
-        assertThat(reloaded.getStatus()).isEqualTo(OrderStatus.PENDING);
-        assertThat(productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity()).isEqualTo(8);
-        assertThat(productRepository.findById(mouse.getId()).orElseThrow().getStockQuantity()).isEqualTo(5);
-    }
-
-    @Test
-    void commitsCancellationAndRestoresStockInPostgreSQL() {
-        orderService.cancelOrder(orderId);
-
-        assertThat(orderRepository.findById(orderId).orElseThrow().getStatus()).isEqualTo(OrderStatus.CANCELLED);
-        assertThat(productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity()).isEqualTo(10);
-        assertThat(productRepository.findById(mouse.getId()).orElseThrow().getStockQuantity()).isEqualTo(6);
     }
 
     private static void authenticate(User user) {

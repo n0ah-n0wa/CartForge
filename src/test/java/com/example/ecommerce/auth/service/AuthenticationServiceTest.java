@@ -90,6 +90,21 @@ class AuthenticationServiceTest {
     }
 
     @Test
+    void unknownEmailStillPerformsAPasswordComparisonAgainstTheDecoyHash() {
+        PasswordEncoder encoder = org.mockito.Mockito.mock(PasswordEncoder.class);
+        when(encoder.encode(any())).thenReturn("{bcrypt}decoy");
+        when(encoder.matches("secret-Password1!", "{bcrypt}decoy")).thenReturn(false);
+        when(userRepository.findByEmailIgnoreCase("nobody@example.com")).thenReturn(Optional.empty());
+        AuthenticationService service = new AuthenticationService(userRepository, encoder, jwtTokenService);
+
+        assertThatThrownBy(() ->
+                        service.authenticate(new LoginRequest("nobody@example.com", "secret-Password1!")))
+                .isInstanceOf(InvalidCredentialsException.class);
+
+        verify(encoder).matches("secret-Password1!", "{bcrypt}decoy");
+    }
+
+    @Test
     void rejectsAWrongPassword() {
         when(userRepository.findByEmailIgnoreCase("ada@example.com")).thenReturn(Optional.of(customer()));
 

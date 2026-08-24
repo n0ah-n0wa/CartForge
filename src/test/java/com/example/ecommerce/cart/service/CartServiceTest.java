@@ -247,6 +247,55 @@ class CartServiceTest {
     }
 
     @Test
+    void addItemRejectsWhenTheAuthenticatedOwnerCannotBeLocked() {
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.empty());
+        when(userRepository.findByIdForUpdate(USER_ID)).thenReturn(Optional.empty());
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(activeProduct(10)));
+
+        assertThatThrownBy(() -> cartService.addItem(new AddCartItemCommand(PRODUCT_ID, 1)))
+                .isInstanceOf(CartOwnerNotFoundException.class);
+        verify(cartRepository, never()).save(any());
+    }
+
+    @Test
+    void updateItemRejectsWhenTheUserHasNoCart() {
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(activeProduct(10)));
+        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> cartService.updateItem(PRODUCT_ID, new UpdateCartItemCommand(1)))
+                .isInstanceOf(CartItemNotFoundException.class);
+        verify(cartRepository, never()).save(any());
+    }
+
+    @Test
+    void removeItemRejectsWhenTheUserHasNoCart() {
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(activeProduct(10)));
+        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> cartService.removeItem(PRODUCT_ID))
+                .isInstanceOf(CartItemNotFoundException.class);
+    }
+
+    @Test
+    void removeItemStillWorksWhenTheProductIsInactive() {
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        Product product = activeProduct(10);
+        Cart cart = cartWithProduct(product, 2);
+        product.deactivate();
+        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
+        when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product));
+        when(cartRepository.save(cart)).thenReturn(cart);
+
+        CartResponse response = cartService.removeItem(PRODUCT_ID);
+
+        assertThat(cart.isEmpty()).isTrue();
+        assertThat(response.items()).isEmpty();
+    }
+
+    @Test
     void updateItemRejectsNonPositiveQuantity() {
         when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
 

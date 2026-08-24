@@ -68,6 +68,7 @@ class ObservabilityIntegrationTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).contains("\"status\":\"UP\"");
         assertBodyHasNoSecrets(response.getBody());
+        // Aggregate health must not leak Redis component details such as "available".
         assertThat(response.getBody()).doesNotContain("available");
     }
 
@@ -125,21 +126,24 @@ class ObservabilityIntegrationTest {
     }
 
     @Test
-    void dangerousActuatorEndpointsAreNotExposed() {
+    void dangerousActuatorEndpointsAreDeniedEvenWithoutAuthentication() {
+        // denyAll so a misconfiguration that re-enables these endpoints cannot
+        // expose them anonymously. Anonymous callers hit the authentication
+        // entry point (401); authenticated callers would get 403.
         assertThat(restTemplate.getForEntity("/actuator/env", String.class).getStatusCode())
-                .isEqualTo(HttpStatus.NOT_FOUND);
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(restTemplate.getForEntity("/actuator/beans", String.class).getStatusCode())
-                .isEqualTo(HttpStatus.NOT_FOUND);
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(restTemplate.getForEntity("/actuator/configprops", String.class).getStatusCode())
-                .isEqualTo(HttpStatus.NOT_FOUND);
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(restTemplate.getForEntity("/actuator/heapdump", String.class).getStatusCode())
-                .isEqualTo(HttpStatus.NOT_FOUND);
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(restTemplate.getForEntity("/actuator/threaddump", String.class).getStatusCode())
-                .isEqualTo(HttpStatus.NOT_FOUND);
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(restTemplate.getForEntity("/actuator/mappings", String.class).getStatusCode())
-                .isEqualTo(HttpStatus.NOT_FOUND);
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(restTemplate.getForEntity("/actuator/shutdown", String.class).getStatusCode())
-                .isEqualTo(HttpStatus.NOT_FOUND);
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(environment.getProperty("management.endpoint.env.enabled")).isEqualTo("false");
         assertThat(environment.getProperty("management.endpoint.env.show-values")).isEqualTo("never");
         assertThat(environment.getProperty("management.endpoints.web.exposure.include"))

@@ -242,16 +242,16 @@ class OrderRetrievalApiIntegrationTest {
                         .contentType(APPLICATION_JSON)
                         .content("{\"shippingAddress\":\"1 Main Street\"}"))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").isNumber())
+                .andExpect(jsonPath("$.orderNumber").isNotEmpty())
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
 
-        assertThat(response).contains("\"id\"");
-        return orderRepository.findAll().stream()
-                .filter(order -> order.getUser().getId().equals(owner.getId()))
-                .reduce((first, second) -> second)
-                .orElseThrow()
-                .getId();
+        Long orderId = ((Number) com.jayway.jsonpath.JsonPath.read(response, "$.id")).longValue();
+        assertThat(orderRepository.findById(orderId)).isPresent();
+        assertThat(orderRepository.findById(orderId).orElseThrow().getUser().getId()).isEqualTo(owner.getId());
+        return orderId;
     }
 
     private String bearer(User user) {

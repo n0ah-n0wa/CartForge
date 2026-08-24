@@ -89,6 +89,18 @@ class UserRepositoryTest {
     }
 
     @Test
+    void findByIdForUpdateReturnsTheRowOrEmpty() {
+        User saved = userRepository.saveAndFlush(customer("lock-lookup@example.com"));
+
+        assertThat(userRepository.findByIdForUpdate(saved.getId()))
+                .isPresent()
+                .get()
+                .extracting(User::getEmail)
+                .isEqualTo("lock-lookup@example.com");
+        assertThat(userRepository.findByIdForUpdate(9_999L)).isEmpty();
+    }
+
+    @Test
     void rejectsDuplicateEmailRegardlessOfCase() {
         userRepository.saveAndFlush(customer("ada@example.com"));
 

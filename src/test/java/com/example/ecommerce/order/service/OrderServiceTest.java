@@ -152,6 +152,37 @@ class OrderServiceTest {
     }
 
     @Test
+    void checkoutDecrementsEveryLineThenClearsTheCart() {
+        User customer = user(USER_ID);
+        Product keyboard = product(PRODUCT_ID, "KB-001", "Keyboard", "keyboard", "49.50", 10, true);
+        Product mouse = product(99L, "MS-001", "Mouse", "mouse", "10.00", 5, true);
+        Cart cart = Cart.forUser(customer);
+        cart.addOrIncrease(mouse, 1);
+        cart.addOrIncrease(keyboard, 2);
+
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
+        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
+        when(orderNumberGenerator.nextOrderNumber()).thenReturn("ORD-2026-000002");
+        when(inventoryService.decreaseStock(PRODUCT_ID, 2)).thenReturn(new StockLevel(PRODUCT_ID, 8, 1L));
+        when(inventoryService.decreaseStock(99L, 1)).thenReturn(new StockLevel(99L, 4, 1L));
+        when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> {
+            Order order = invocation.getArgument(0);
+            ReflectionTestUtils.setField(order, "id", 101L);
+            return order;
+        });
+        when(cartRepository.save(cart)).thenReturn(cart);
+
+        OrderResponse response = orderService.checkout(CHECKOUT);
+
+        assertThat(response.items()).hasSize(2);
+        assertThat(cart.isEmpty()).isTrue();
+        verify(inventoryService).decreaseStock(PRODUCT_ID, 2);
+        verify(inventoryService).decreaseStock(99L, 1);
+        verify(cartRepository).save(cart);
+    }
+
+    @Test
     void checkoutRejectsWhenCustomerHasNoCart() {
         when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user(USER_ID)));
@@ -551,6 +582,30 @@ class OrderServiceTest {
         assertThatThrownBy(() -> orderService.cancelOrder(603L)).isInstanceOf(InventoryConflictException.class);
 
         verify(orderRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void cancelOrderRestoresEveryLineInProductIdOrder() {
+        User customer = user(USER_ID);
+        Product keyboard = product(PRODUCT_ID, "KB-001", "Keyboard", "keyboard", "49.50", 10, true);
+        Product mouse = product(99L, "MS-001", "Mouse", "mouse", "10.00", 5, true);
+        Order order = Order.place("ORD-2026-000023", customer, "1 Main Street", CurrencyCode.EUR);
+        order.addItem(mouse, 1);
+        order.addItem(keyboard, 2);
+        ReflectionTestUtils.setField(order, "id", 604L);
+
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        when(orderRepository.findWithItemsByIdAndUserIdForUpdate(604L, USER_ID)).thenReturn(Optional.of(order));
+        when(inventoryService.restoreStock(99L, 1)).thenReturn(new StockLevel(99L, 6, 1L));
+        when(inventoryService.restoreStock(PRODUCT_ID, 2)).thenReturn(new StockLevel(PRODUCT_ID, 12, 1L));
+        when(orderRepository.saveAndFlush(order)).thenAnswer(invocation -> invocation.getArgument(0));
+
+        orderService.cancelOrder(604L);
+
+        var orderVerifier = org.mockito.Mockito.inOrder(inventoryService);
+        orderVerifier.verify(inventoryService).restoreStock(PRODUCT_ID, 2);
+        orderVerifier.verify(inventoryService).restoreStock(99L, 1);
+        verify(orderRepository).saveAndFlush(order);
     }
 
     private static User user(long id) {

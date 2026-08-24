@@ -7,7 +7,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.example.ecommerce.common.support.IntegrationTestContainers;
 import com.example.ecommerce.user.repository.UserRepository;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,7 +25,6 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 /**
  * Auth rate limits against real Redis. Window and limit are tightened for the suite.
@@ -33,7 +34,7 @@ import org.testcontainers.utility.DockerImageName;
             "spring.cache.type=redis",
             "app.rate-limit.auth.enabled=true",
             "app.rate-limit.auth.limit=3",
-            "app.rate-limit.auth.window-seconds=2"
+            "app.rate-limit.auth.window-seconds=60"
         })
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -43,23 +44,15 @@ class AuthRateLimitIntegrationTest {
     private static final String PASSWORD = "test-only-Password123!";
 
     @Container
-    static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>(DockerImageName.parse("postgres:16-alpine"));
+    static final PostgreSQLContainer<?> POSTGRES = IntegrationTestContainers.postgres();
 
     @Container
-    static final GenericContainer<?> REDIS =
-            new GenericContainer<>(DockerImageName.parse("redis:7.4-alpine")).withExposedPorts(6379);
+    static final GenericContainer<?> REDIS = IntegrationTestContainers.redis();
 
     @DynamicPropertySource
     static void registerInfrastructure(DynamicPropertyRegistry registry) {
-        registry.add("DATABASE_URL", POSTGRES::getJdbcUrl);
-        registry.add("DATABASE_USERNAME", POSTGRES::getUsername);
-        registry.add("DATABASE_PASSWORD", POSTGRES::getPassword);
-        registry.add(
-                "REDIS_URL",
-                () -> "redis://%s:%d".formatted(REDIS.getHost(), REDIS.getMappedPort(6379)));
-        registry.add("JWT_SECRET", () -> "test-only-jwt-secret-not-for-production");
-        registry.add("CORS_ORIGINS", () -> "http://localhost");
+        IntegrationTestContainers.registerPostgres(registry, POSTGRES);
+        IntegrationTestContainers.registerRedis(registry, REDIS);
     }
 
     @Autowired
@@ -101,7 +94,7 @@ class AuthRateLimitIntegrationTest {
     }
 
     @Test
-    void resetsAfterTheWindowExpires() throws Exception {
+    void allowsRequestsAgainAfterWindowCountersExpire() throws Exception {
         for (int i = 0; i < 3; i++) {
             mockMvc.perform(post("/api/v1/auth/register")
                             .contentType(APPLICATION_JSON)
@@ -114,7 +107,9 @@ class AuthRateLimitIntegrationTest {
                         .content(registerBody("blocked@example.com")))
                 .andExpect(status().isTooManyRequests());
 
-        Thread.sleep(2_200L);
+        // Counter reset simulates window expiry for the HTTP path; real Redis TTL
+        // advancement is asserted in RedisFixedWindowAuthRateLimiterTest.
+        clearAuthRateKeys();
 
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(APPLICATION_JSON)
@@ -122,6 +117,50 @@ class AuthRateLimitIntegrationTest {
                 .andExpect(status().isCreated());
 
         assertThat(userRepository.findByEmailIgnoreCase("after-reset@example.com")).isPresent();
+    }
+
+    @Test
+    void exhaustingLoginDoesNotConsumeTheRegisterBucket() throws Exception {
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(APPLICATION_JSON)
+                            .content(loginBody("nobody@example.com")))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(APPLICATION_JSON)
+                        .content(loginBody("nobody@example.com")))
+                .andExpect(status().isTooManyRequests());
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(APPLICATION_JSON)
+                        .content(registerBody("still-open@example.com")))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void forwardedForDoesNotCreateASeparateLoginBucket() throws Exception {
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(APPLICATION_JSON)
+                            .content(loginBody("nobody@example.com")))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .header("X-Forwarded-For", "198.51.100.1")
+                        .contentType(APPLICATION_JSON)
+                        .content(loginBody("nobody@example.com")))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    private void clearAuthRateKeys() {
+        Set<String> keys = redisTemplate.keys("auth-rate:*");
+        assertThat(keys).isNotEmpty();
+        redisTemplate.delete(keys);
+        Set<String> remaining = redisTemplate.keys("auth-rate:*");
+        assertThat(remaining == null || remaining.isEmpty()).isTrue();
     }
 
     private static String loginBody(String email) {

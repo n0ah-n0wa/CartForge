@@ -47,10 +47,16 @@ public class SecurityConfig {
                         .authenticationEntryPoint(problemHandlers.unauthorized())
                         .accessDeniedHandler(problemHandlers.forbidden()))
                 .authorizeHttpRequests(auth -> {
-                    // Only health and prometheus are enabled. Other /actuator
-                    // paths 404 without requiring a JWT (401 would hide that they
-                    // are disabled).
-                    auth.requestMatchers("/actuator/**").permitAll();
+                    // Health and Prometheus are intentionally public for probes and
+                    // scrapers (network-restrict Prometheus in deployment). Every
+                    // other Actuator path is denied so a misconfiguration that
+                    // re-enables env/beans/heapdump cannot expose them anonymously.
+                    auth.requestMatchers(
+                                    "/actuator/health",
+                                    "/actuator/health/**",
+                                    "/actuator/prometheus")
+                            .permitAll();
+                    auth.requestMatchers("/actuator", "/actuator/**").denyAll();
                     if (environment.matchesProfiles("dev")) {
                         auth.requestMatchers(
                                         "/v3/api-docs",

@@ -13,6 +13,8 @@ import com.example.ecommerce.cart.repository.CartRepository;
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.category.repository.CategoryRepository;
 import com.example.ecommerce.common.persistence.CurrencyCode;
+import com.example.ecommerce.common.support.IntegrationTestContainers;
+import com.example.ecommerce.order.repository.CheckoutIdempotencyKeyRepository;
 import com.example.ecommerce.order.repository.OrderItemRepository;
 import com.example.ecommerce.order.repository.OrderRepository;
 import com.example.ecommerce.product.entity.Product;
@@ -42,7 +44,6 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 /**
  * Commits each request so concurrent checkout races exercise cart locks and
@@ -64,17 +65,11 @@ class CheckoutConcurrencyIntegrationTest {
     private static final int CONCURRENT_CHECKOUTS = 8;
 
     @Container
-    static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>(DockerImageName.parse("postgres:16-alpine"));
+    static final PostgreSQLContainer<?> POSTGRES = IntegrationTestContainers.postgres();
 
     @DynamicPropertySource
     static void registerInfrastructure(DynamicPropertyRegistry registry) {
-        registry.add("DATABASE_URL", POSTGRES::getJdbcUrl);
-        registry.add("DATABASE_USERNAME", POSTGRES::getUsername);
-        registry.add("DATABASE_PASSWORD", POSTGRES::getPassword);
-        registry.add("REDIS_URL", () -> "redis://localhost:6379");
-        registry.add("JWT_SECRET", () -> "test-only-jwt-secret-not-for-production");
-        registry.add("CORS_ORIGINS", () -> "http://localhost");
+        IntegrationTestContainers.registerPostgresWithoutRedis(registry, POSTGRES);
     }
 
     @Autowired
@@ -104,11 +99,15 @@ class CheckoutConcurrencyIntegrationTest {
     @Autowired
     private OrderItemRepository orderItemRepository;
 
+    @Autowired
+    private CheckoutIdempotencyKeyRepository checkoutIdempotencyKeyRepository;
+
     private Category books;
 
     @BeforeEach
     void setUp() {
         orderItemRepository.deleteAll();
+        checkoutIdempotencyKeyRepository.deleteAll();
         orderRepository.deleteAll();
         cartItemRepository.deleteAll();
         cartRepository.deleteAll();
@@ -138,8 +137,6 @@ class CheckoutConcurrencyIntegrationTest {
         assertThat(rejected.get()).isEqualTo(buyers - stock);
         assertThat(orderRepository.count()).isEqualTo(stock);
         assertThat(productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity()).isZero();
-        assertThat(productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity())
-                .isGreaterThanOrEqualTo(0);
 
         long clearedCarts = customers.stream()
                 .filter(user -> cartRepository.findWithItemsByUserId(user.getId())
@@ -177,8 +174,6 @@ class CheckoutConcurrencyIntegrationTest {
         assertThat(rejected.get()).isEqualTo(1);
         assertThat(orderRepository.count()).isEqualTo(1);
         assertThat(productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity()).isZero();
-        assertThat(productRepository.findById(keyboard.getId()).orElseThrow().getStockQuantity())
-                .isGreaterThanOrEqualTo(0);
     }
 
     @Test
@@ -223,39 +218,34 @@ class CheckoutConcurrencyIntegrationTest {
         int mouseStock = productRepository.findById(mouse.getId()).orElseThrow().getStockQuantity();
         long orders = orderRepository.count();
 
-        assertThat(keyboardStock).isGreaterThanOrEqualTo(0);
-        assertThat(mouseStock).isGreaterThanOrEqualTo(0);
-        assertThat(orders).isEqualTo(created.get());
         assertThat(created.get() + rejected.get()).isEqualTo(2);
-        // One unit of mouse and one of keyboard: at most two orders, and units
-        // sold must match remaining stock.
-        int keyboardsSold = 1 - keyboardStock;
-        int miceSold = 1 - mouseStock;
-        assertThat(keyboardsSold).isBetween(0, 1);
-        assertThat(miceSold).isBetween(0, 1);
-        assertThat(orders).isEqualTo(created.get());
+        assertThat(created.get()).isEqualTo(1);
+        assertThat(orders).isEqualTo(1);
+        // Alice needs both SKUs; Bob needs only mouse. Exactly one buyer takes
+        // the mouse; keyboard stock drops only when Alice is the winner.
+        assertThat(mouseStock).isZero();
+        long ordersTakingMouse = orderRepository.findAll().stream()
+                .map(order -> orderRepository.findWithItemsById(order.getId()).orElseThrow())
+                .filter(order -> order.getItems().stream().anyMatch(item -> item.getSku().equals("MS-OV")))
+                .count();
+        assertThat(ordersTakingMouse).isEqualTo(1);
+        var winner = orderRepository.findWithItemsById(orderRepository.findAll().getFirst().getId()).orElseThrow();
+        if (winner.getItems().size() == 2) {
+            assertThat(keyboardStock).isZero();
+            assertThat(winner.getUser().getId()).isEqualTo(alice.getId());
+        } else {
+            assertThat(winner.getItems()).hasSize(1);
+            assertThat(keyboardStock).isEqualTo(1);
+            assertThat(winner.getUser().getId()).isEqualTo(bob.getId());
+        }
         orderRepository.findAll().forEach(order -> {
             var withItems = orderRepository.findWithItemsById(order.getId()).orElseThrow();
-            int expected = withItems.getItems().stream()
-                    .mapToInt(item -> item.getSku().equals("KB-OV") ? 1 : 0)
-                    .sum();
             assertThat(withItems.getItems()).isNotEmpty();
             assertThat(withItems.getTotalAmount())
                     .isEqualByComparingTo(withItems.getItems().stream()
                             .map(item -> item.getLineTotal())
                             .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add));
-            assertThat(expected).isIn(0, 1);
         });
-        long ordersTakingKeyboard = orderRepository.findAll().stream()
-                .map(order -> orderRepository.findWithItemsById(order.getId()).orElseThrow())
-                .filter(order -> order.getItems().stream().anyMatch(item -> item.getSku().equals("KB-OV")))
-                .count();
-        long ordersTakingMouse = orderRepository.findAll().stream()
-                .map(order -> orderRepository.findWithItemsById(order.getId()).orElseThrow())
-                .filter(order -> order.getItems().stream().anyMatch(item -> item.getSku().equals("MS-OV")))
-                .count();
-        assertThat(ordersTakingKeyboard).isEqualTo(keyboardsSold);
-        assertThat(ordersTakingMouse).isEqualTo(miceSold);
     }
 
     private void runConcurrent(

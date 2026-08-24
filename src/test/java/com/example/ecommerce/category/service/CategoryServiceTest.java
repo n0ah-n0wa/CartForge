@@ -47,6 +47,44 @@ class CategoryServiceTest {
     }
 
     @Test
+    void createRejectsDuplicateSlug() {
+        when(categoryRepository.existsByName("Books")).thenReturn(false);
+        when(categoryRepository.existsBySlug("books")).thenReturn(true);
+
+        assertThatThrownBy(() -> categoryService.create(new CreateCategoryCommand("Books", "books", null)))
+                .isInstanceOf(DuplicateCategoryException.class)
+                .extracting(ex -> ((DuplicateCategoryException) ex).code())
+                .isEqualTo("DUPLICATE_CATEGORY_SLUG");
+    }
+
+    @Test
+    void createTranslatesAUniqueSlugConstraintViolation() {
+        when(categoryRepository.existsByName("Books")).thenReturn(false);
+        when(categoryRepository.existsBySlug("books")).thenReturn(false);
+        when(categoryRepository.save(org.mockito.ArgumentMatchers.any(Category.class)))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException(
+                        "ERROR: duplicate key value violates unique constraint \"uq_categories_slug\""));
+
+        assertThatThrownBy(() -> categoryService.create(new CreateCategoryCommand("Books", "books", null)))
+                .isInstanceOf(DuplicateCategoryException.class)
+                .extracting(ex -> ((DuplicateCategoryException) ex).code())
+                .isEqualTo("DUPLICATE_CATEGORY_SLUG");
+    }
+
+    @Test
+    void reassignAndDeleteMovesProductsThenDeletesTheSource() {
+        Category source = Category.create("Books", "books", null);
+        Category target = Category.create("Media", "media", null);
+        when(categoryRepository.findById(3L)).thenReturn(Optional.of(source));
+        when(categoryRepository.findById(9L)).thenReturn(Optional.of(target));
+
+        categoryService.reassignAndDelete(3L, 9L);
+
+        verify(productReference).reassign(3L, 9L);
+        verify(categoryRepository).delete(source);
+    }
+
+    @Test
     void updateRejectsDuplicateSlugForAnotherCategory() {
         Category category = Category.create("Books", "books", null);
         when(categoryRepository.findById(8L)).thenReturn(java.util.Optional.of(category));
