@@ -57,7 +57,7 @@ The decoder additionally requires `exp`, `sub`, `email`, and `role` to be presen
 
 The decoder is locked to HS256 with the configured HMAC secret. Tokens that declare `none`, a different MAC algorithm, or an asymmetric algorithm are rejected.
 
-Authentication and authorization failures return an empty body and, for 401, `WWW-Authenticate: Bearer` with no `error_description`. Spring's default resource-server entry point would otherwise copy the decoder exception into that header.
+Authentication and authorization failures return the standard error JSON and, for 401, `WWW-Authenticate: Bearer` with no `error_description`. Spring's default resource-server entry point would otherwise copy the decoder exception into that header.
 
 Tokens are credentials: `AccessTokenResponse.toString` is redacted so a token cannot reach a log.
 
@@ -135,9 +135,9 @@ All external input is validated with Jakarta Bean Validation. Validation and bus
 }
 ```
 
-Central handling uses `@RestControllerAdvice`. Clients must never receive SQL, stack traces, internal class names, database credentials, or JWT material.
+Central handling uses `@RestControllerAdvice`. Clients must never receive SQL, stack traces, internal class names, database credentials, or JWT material. Authentication and authorization failures use the same JSON envelope (`UNAUTHORIZED` / `FORBIDDEN`); 401 responses also set `WWW-Authenticate: Bearer` without an `error_description`.
 
-Business conflicts (insufficient stock, illegal status transitions, optimistic-lock failure) should use HTTP 409 where appropriate. An empty cart at checkout is specified as 400 or 409; planned mapping is 400 or 422 for empty cart, and 409 for stock, version, and state conflicts.
+Business conflicts (insufficient stock, illegal status transitions, optimistic-lock failure) use HTTP 409 where appropriate. An empty cart at checkout is mapped to 409 (`EMPTY_CART`). Unexpected failures return 500 (`INTERNAL_ERROR`) with a generic message.
 
 ## CORS
 

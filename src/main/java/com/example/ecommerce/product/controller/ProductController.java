@@ -8,11 +8,11 @@ import com.example.ecommerce.product.dto.CreateProductCommand;
 import com.example.ecommerce.product.dto.PatchProductCommand;
 import com.example.ecommerce.product.dto.ProductResponse;
 import com.example.ecommerce.product.dto.UpdateProductCommand;
-import com.example.ecommerce.product.entity.Product;
-import com.example.ecommerce.product.mapper.ProductMapper;
+import com.example.ecommerce.product.service.InvalidProductQueryException;
 import com.example.ecommerce.product.service.ProductSearchCriteria;
 import com.example.ecommerce.product.service.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -40,31 +40,30 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProductController {
 
     private final ProductService productService;
-    private final ProductMapper productMapper;
     private final CurrentUserProvider currentUser;
     private final ApplicationProperties properties;
 
     public ProductController(
             ProductService productService,
-            ProductMapper productMapper,
             CurrentUserProvider currentUser,
             ApplicationProperties properties) {
         this.productService = productService;
-        this.productMapper = productMapper;
         this.currentUser = currentUser;
         this.properties = properties;
     }
 
     @GetMapping
     @Operation(
-            summary = "Search active products",
-            description = "Public catalog search over active products. Supports category slug, "
-                    + "minPrice/maxPrice, case-insensitive text search (name/sku/description), "
-                    + "allowlisted sorting (name, price, sku, createdAt, stockQuantity), and "
-                    + "bounded pagination. Example: "
+            summary = "Search products",
+            description = "Supports category slug, minPrice/maxPrice, case-insensitive text search "
+                    + "(name/sku/description), allowlisted sorting (name, price, sku, createdAt, "
+                    + "stockQuantity), bounded pagination, and active-status filtering. "
+                    + "Anonymous and customer callers always receive active products only; "
+                    + "the optional active query parameter is available to administrators "
+                    + "(true, false, or omit for both). Example: "
                     + "?category=electronics&minPrice=100&maxPrice=2000&search=laptop&sort=price,asc. "
                     + "Page size is capped by app.pagination.max-page-size.")
-    @ApiResponse(responseCode = "200", description = "Paged active products")
+    @ApiResponse(responseCode = "200", description = "Paged products")
     @ApiResponse(responseCode = "400", description = "Invalid page, size, sort, or filter parameter")
     public PageResponse<ProductResponse> list(
             @RequestParam(required = false) Integer page,
@@ -73,6 +72,8 @@ public class ProductController {
             @RequestParam(required = false) BigDecimal minPrice,
             @RequestParam(required = false) BigDecimal maxPrice,
             @RequestParam(required = false) String search,
+            @Parameter(description = "Administrator only. true=active, false=inactive, omit=both.")
+            @RequestParam(required = false) Boolean active,
             HttpServletRequest request) {
         // Read raw sort values so "sort=price,asc" stays one token. Binding to
         // List/String[] would CSV-split on the comma and treat "asc" as a field name.
@@ -85,9 +86,20 @@ public class ProductController {
                 page,
                 size,
                 sortParams(request),
+                resolveActiveFilter(active),
                 properties.pagination().defaultPageSize(),
                 properties.pagination().maxPageSize());
         return productService.searchResponses(criteria);
+    }
+
+    private Boolean resolveActiveFilter(Boolean active) {
+        if (currentUser.isAdmin()) {
+            return active;
+        }
+        if (active != null) {
+            throw new InvalidProductQueryException("active filter requires administrator privileges");
+        }
+        return Boolean.TRUE;
     }
 
     private static List<String> sortParams(HttpServletRequest request) {
@@ -118,9 +130,8 @@ public class ProductController {
     @ApiResponse(responseCode = "403", description = "Administrator role required")
     @ApiResponse(responseCode = "409", description = "Duplicate SKU or slug")
     public ResponseEntity<ProductResponse> create(@Valid @RequestBody CreateProductCommand command) {
-        Product created = productService.create(command);
-        ProductResponse body = productMapper.toResponse(created);
-        return ResponseEntity.created(URI.create("/api/v1/products/" + created.getId())).body(body);
+        ProductResponse body = productService.createResponse(command);
+        return ResponseEntity.created(URI.create("/api/v1/products/" + body.id())).body(body);
     }
 
     @PutMapping("/{id}")
@@ -137,7 +148,7 @@ public class ProductController {
     @ApiResponse(responseCode = "404", description = "Product not found")
     @ApiResponse(responseCode = "409", description = "Version conflict or duplicate slug")
     public ProductResponse replace(@PathVariable Long id, @Valid @RequestBody UpdateProductCommand command) {
-        return productMapper.toResponse(productService.update(id, command));
+        return productService.updateResponse(id, command);
     }
 
     @PatchMapping("/{id}")
@@ -154,7 +165,7 @@ public class ProductController {
     @ApiResponse(responseCode = "404", description = "Product not found")
     @ApiResponse(responseCode = "409", description = "Version conflict or duplicate slug")
     public ProductResponse patch(@PathVariable Long id, @Valid @RequestBody PatchProductCommand command) {
-        return productMapper.toResponse(productService.patch(id, command));
+        return productService.patchResponse(id, command);
     }
 
     @DeleteMapping("/{id}")

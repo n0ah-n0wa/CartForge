@@ -13,6 +13,10 @@ import org.springframework.util.DigestUtils;
  * Validated catalog query inputs. Constructed only through
  * {@link ProductSearchCriteria#of} so invalid ranges never reach the repository
  * and cache keys match the pagination/search rules applied at query time.
+ *
+ * <p>{@code active} is {@code true}/{@code false} to filter by status, or
+ * {@code null} to include both (administrator listing only). Public catalog
+ * calls always use {@code true}.
  */
 public record ProductSearchCriteria(
         String categorySlug,
@@ -21,7 +25,8 @@ public record ProductSearchCriteria(
         String searchTerm,
         int page,
         int size,
-        List<String> sort
+        List<String> sort,
+        Boolean active
 ) {
 
     public static final int MAX_SEARCH_LENGTH = 100;
@@ -49,12 +54,20 @@ public record ProductSearchCriteria(
                 nullToEmpty(searchTerm),
                 String.valueOf(page),
                 String.valueOf(size),
-                sort.stream().map(ProductSearchCriteria::nullToEmpty).collect(Collectors.joining(",")));
+                sort.stream().map(ProductSearchCriteria::nullToEmpty).collect(Collectors.joining(",")),
+                activeToken(active));
         return DigestUtils.md5DigestAsHex(material.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String priceToken(BigDecimal price) {
         return price == null ? "" : price.stripTrailingZeros().toPlainString();
+    }
+
+    private static String activeToken(Boolean active) {
+        if (active == null) {
+            return "*";
+        }
+        return active ? "1" : "0";
     }
 
     private static String nullToEmpty(String value) {
@@ -75,6 +88,7 @@ public record ProductSearchCriteria(
             Integer page,
             Integer size,
             List<String> sort,
+            Boolean active,
             int defaultPageSize,
             int maxPageSize) {
         BigDecimal normalizedMin = normalizePrice(minPrice, "minPrice");
@@ -90,13 +104,41 @@ public record ProductSearchCriteria(
                 normalizeSearch(search),
                 resolvePage(page),
                 PageRequests.resolvePageSize(size, defaultPageSize, maxPageSize),
-                normalizeSort(sort));
+                normalizeSort(sort),
+                active);
     }
 
     /**
-     * Convenience overload using the documented defaults (page size 20, max 100).
-     * Production request handling must call the overload that receives the live
-     * {@code app.pagination} settings so cache keys stay aligned with queries.
+     * Public-catalog overload: always filters to active products.
+     */
+    public static ProductSearchCriteria of(
+            String category,
+            BigDecimal minPrice,
+            BigDecimal maxPrice,
+            String search,
+            Integer page,
+            Integer size,
+            List<String> sort,
+            int defaultPageSize,
+            int maxPageSize) {
+        return of(
+                category,
+                minPrice,
+                maxPrice,
+                search,
+                page,
+                size,
+                sort,
+                Boolean.TRUE,
+                defaultPageSize,
+                maxPageSize);
+    }
+
+    /**
+     * Convenience overload using the documented defaults (page size 20, max 100)
+     * and active-only filtering. Production request handling must call the
+     * overload that receives the live {@code app.pagination} settings so cache
+     * keys stay aligned with queries.
      */
     public static ProductSearchCriteria of(
             String category,
@@ -106,7 +148,7 @@ public record ProductSearchCriteria(
             Integer page,
             Integer size,
             List<String> sort) {
-        return of(category, minPrice, maxPrice, search, page, size, sort, 20, 100);
+        return of(category, minPrice, maxPrice, search, page, size, sort, Boolean.TRUE, 20, 100);
     }
 
     private static int resolvePage(Integer page) {

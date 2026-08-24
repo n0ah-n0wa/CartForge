@@ -7,6 +7,8 @@ import com.example.ecommerce.order.dto.OrderResponse;
 import com.example.ecommerce.order.dto.OrderSummaryResponse;
 import com.example.ecommerce.order.service.OrderService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -83,6 +85,10 @@ public class OrderController {
                     + "Idempotency-Key; the same user and key replay the original order when "
                     + "the body is equivalent and never create a second order.",
             security = @SecurityRequirement(name = "bearerAuth"))
+    @Parameter(
+            name = "Idempotency-Key",
+            in = ParameterIn.HEADER,
+            description = "Optional client key. Replays the original order when the request body matches.")
     @ApiResponse(responseCode = "200", description = "Existing order returned for a matching Idempotency-Key")
     @ApiResponse(responseCode = "201", description = "Order created")
     @ApiResponse(responseCode = "400", description = "Validation failure, inactive product, or invalid Idempotency-Key")

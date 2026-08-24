@@ -115,11 +115,21 @@ public class ProductService {
         ensureUniqueSlug(command.slug(), null);
         try {
             Product created = productRepository.saveAndFlush(productMapper.toEntity(command, category));
-            // Reload with the category graph so controllers can map outside this transaction.
+            // Reload with the category graph so callers can map outside this transaction.
             return productRepository.findWithCategoryById(created.getId()).orElse(created);
         } catch (DataIntegrityViolationException duplicate) {
             throw translateDuplicate(duplicate, command.sku(), command.slug());
         }
+    }
+
+    /**
+     * Proxy entry used by the REST layer. Cache eviction is declared here
+     * because {@link #create} is invoked as {@code this.create} and would
+     * otherwise skip Spring cache advice.
+     */
+    @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    public ProductResponse createResponse(CreateProductCommand command) {
+        return productMapper.toResponse(create(command));
     }
 
     @Caching(evict = {
@@ -139,6 +149,14 @@ public class ProductService {
             @CacheEvict(cacheNames = CatalogCaches.PRODUCT, key = "#id"),
             @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
     })
+    public ProductResponse updateResponse(Long id, UpdateProductCommand command) {
+        return productMapper.toResponse(update(id, command));
+    }
+
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, key = "#id"),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public Product patch(Long id, PatchProductCommand command) {
         Product product = requireWithCategory(id);
         assertVersion(product, command.version());
@@ -151,6 +169,14 @@ public class ProductService {
         productMapper.applyPatch(command, product, category);
         String slug = command.slug() != null ? command.slug() : product.getSlug();
         return flushProduct(product, product.getSku(), slug);
+    }
+
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, key = "#id"),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
+    public ProductResponse patchResponse(Long id, PatchProductCommand command) {
+        return productMapper.toResponse(patch(id, command));
     }
 
     /**

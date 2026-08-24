@@ -223,7 +223,7 @@ class ProductServiceTest {
                 "keyboard",
                 null,
                 new BigDecimal("10.00"),
-                null,
+                CurrencyCode.EUR,
                 1,
                 categoryId);
     }

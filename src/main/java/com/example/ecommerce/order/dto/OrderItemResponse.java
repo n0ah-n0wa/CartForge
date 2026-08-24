@@ -1,5 +1,6 @@
 package com.example.ecommerce.order.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 
 /**
@@ -10,8 +11,8 @@ public record OrderItemResponse(
         Long productId,
         String productName,
         String sku,
-        BigDecimal unitPrice,
+        @Schema(example = "49.50") BigDecimal unitPrice,
         int quantity,
-        BigDecimal lineTotal
+        @Schema(example = "99.00") BigDecimal lineTotal
 ) {
 }

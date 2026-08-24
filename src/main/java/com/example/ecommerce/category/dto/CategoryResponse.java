@@ -1,5 +1,6 @@
 package com.example.ecommerce.category.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 
 public record CategoryResponse(
@@ -8,7 +9,7 @@ public record CategoryResponse(
         String slug,
         String description,
         boolean active,
-        Instant createdAt,
-        Instant updatedAt
+        @Schema(description = "UTC instant") Instant createdAt,
+        @Schema(description = "UTC instant") Instant updatedAt
 ) {
 }

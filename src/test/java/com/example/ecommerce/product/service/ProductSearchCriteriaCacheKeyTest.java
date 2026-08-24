@@ -68,4 +68,18 @@ class ProductSearchCriteriaCacheKeyTest {
                 .isNotEqualTo(differentPage.cacheKey())
                 .isNotEqualTo(differentSearch.cacheKey());
     }
+
+    @Test
+    void cacheKeyChangesWhenActiveFilterDiffers() {
+        ProductSearchCriteria activeOnly = ProductSearchCriteria.of(
+                null, null, null, null, 0, 10, null, Boolean.TRUE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+        ProductSearchCriteria inactiveOnly = ProductSearchCriteria.of(
+                null, null, null, null, 0, 10, null, Boolean.FALSE, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+        ProductSearchCriteria all = ProductSearchCriteria.of(
+                null, null, null, null, 0, 10, null, null, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+
+        assertThat(activeOnly.cacheKey())
+                .isNotEqualTo(inactiveOnly.cacheKey())
+                .isNotEqualTo(all.cacheKey());
+    }
 }

@@ -4,8 +4,6 @@ import com.example.ecommerce.category.dto.CategoryResponse;
 import com.example.ecommerce.category.dto.CreateCategoryCommand;
 import com.example.ecommerce.category.dto.PatchCategoryCommand;
 import com.example.ecommerce.category.dto.UpdateCategoryCommand;
-import com.example.ecommerce.category.entity.Category;
-import com.example.ecommerce.category.mapper.CategoryMapper;
 import com.example.ecommerce.category.service.CategoryService;
 import com.example.ecommerce.common.security.CurrentUserProvider;
 import com.example.ecommerce.common.security.RequireAdmin;
@@ -33,15 +31,10 @@ import org.springframework.web.bind.annotation.RestController;
 public class CategoryController {
 
     private final CategoryService categoryService;
-    private final CategoryMapper categoryMapper;
     private final CurrentUserProvider currentUser;
 
-    public CategoryController(
-            CategoryService categoryService,
-            CategoryMapper categoryMapper,
-            CurrentUserProvider currentUser) {
+    public CategoryController(CategoryService categoryService, CurrentUserProvider currentUser) {
         this.categoryService = categoryService;
-        this.categoryMapper = categoryMapper;
         this.currentUser = currentUser;
     }
 
@@ -72,9 +65,8 @@ public class CategoryController {
     @ApiResponse(responseCode = "403", description = "Administrator role required")
     @ApiResponse(responseCode = "409", description = "Duplicate name or slug")
     public ResponseEntity<CategoryResponse> create(@Valid @RequestBody CreateCategoryCommand command) {
-        Category created = categoryService.create(command);
-        CategoryResponse body = categoryMapper.toResponse(created);
-        return ResponseEntity.created(URI.create("/api/v1/categories/" + created.getId())).body(body);
+        CategoryResponse body = categoryService.createResponse(command);
+        return ResponseEntity.created(URI.create("/api/v1/categories/" + body.id())).body(body);
     }
 
     @PutMapping("/{id}")
@@ -88,7 +80,7 @@ public class CategoryController {
     @ApiResponse(responseCode = "404", description = "Category not found")
     @ApiResponse(responseCode = "409", description = "Duplicate name or slug")
     public CategoryResponse replace(@PathVariable Long id, @Valid @RequestBody UpdateCategoryCommand command) {
-        return categoryMapper.toResponse(categoryService.update(id, command));
+        return categoryService.updateResponse(id, command);
     }
 
     @PatchMapping("/{id}")
@@ -102,7 +94,7 @@ public class CategoryController {
     @ApiResponse(responseCode = "404", description = "Category not found")
     @ApiResponse(responseCode = "409", description = "Duplicate name or slug")
     public CategoryResponse patch(@PathVariable Long id, @Valid @RequestBody PatchCategoryCommand command) {
-        return categoryMapper.toResponse(categoryService.patch(id, command));
+        return categoryService.patchResponse(id, command);
     }
 
     @DeleteMapping("/{id}")

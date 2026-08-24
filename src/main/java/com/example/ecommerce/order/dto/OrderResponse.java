@@ -2,6 +2,7 @@ package com.example.ecommerce.order.dto;
 
 import com.example.ecommerce.common.persistence.CurrencyCode;
 import com.example.ecommerce.order.OrderStatus;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -10,12 +11,12 @@ public record OrderResponse(
         Long id,
         String orderNumber,
         OrderStatus status,
-        BigDecimal totalAmount,
-        CurrencyCode currency,
+        @Schema(example = "99.00") BigDecimal totalAmount,
+        @Schema(example = "EUR") CurrencyCode currency,
         String shippingAddress,
         List<OrderItemResponse> items,
-        Instant createdAt,
-        Instant updatedAt
+        @Schema(description = "UTC instant") Instant createdAt,
+        @Schema(description = "UTC instant") Instant updatedAt
 ) {
     public OrderResponse {
         items = items == null ? List.of() : List.copyOf(items);

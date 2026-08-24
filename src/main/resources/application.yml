@@ -50,6 +50,9 @@ spring:
   jackson:
     serialization:
       write-dates-as-timestamps: false
+      write-bigdecimal-as-plain: true
+    deserialization:
+      use-big-decimal-for-floats: true
 
 management:
   endpoints:
@@ -92,6 +95,7 @@ app:
       window-seconds: ${APP_RATE_LIMIT_AUTH_WINDOW_SECONDS:60}
 
 springdoc:
+  default-produces-media-type: application/json
   api-docs:
     path: /v3/api-docs
     enabled: false

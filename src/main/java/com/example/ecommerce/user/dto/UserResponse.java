@@ -1,6 +1,7 @@
 package com.example.ecommerce.user.dto;
 
 import com.example.ecommerce.user.UserRole;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 
 /**
@@ -14,7 +15,7 @@ public record UserResponse(
         String lastName,
         UserRole role,
         boolean enabled,
-        Instant createdAt,
-        Instant updatedAt
+        @Schema(description = "UTC instant") Instant createdAt,
+        @Schema(description = "UTC instant") Instant updatedAt
 ) {
 }

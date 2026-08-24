@@ -1,5 +1,6 @@
 package com.example.ecommerce.auth.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 
 /**
@@ -7,9 +8,9 @@ import java.time.Instant;
  * {@code toString} for the same reason passwords are.
  */
 public record AccessTokenResponse(
-        String accessToken,
-        String tokenType,
-        Instant expiresAt
+        @Schema(description = "JWT access token") String accessToken,
+        @Schema(example = "Bearer") String tokenType,
+        @Schema(description = "UTC expiry instant") Instant expiresAt
 ) {
     public static final String BEARER = "Bearer";
 

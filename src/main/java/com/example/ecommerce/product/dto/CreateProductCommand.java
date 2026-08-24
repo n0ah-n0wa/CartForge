@@ -18,7 +18,7 @@ public record CreateProductCommand(
         String slug,
         @Size(max = 4000) String description,
         @NotNull @PositiveOrZero @Digits(integer = 17, fraction = 2) BigDecimal price,
-        CurrencyCode currency,
+        @NotNull CurrencyCode currency,
         @PositiveOrZero int stockQuantity,
         @NotNull Long categoryId
 ) {

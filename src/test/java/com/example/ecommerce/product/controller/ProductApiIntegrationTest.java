@@ -263,6 +263,33 @@ class ProductApiIntegrationTest {
     }
 
     @Test
+    void publicListingRejectsActiveFilter() throws Exception {
+        mockMvc.perform(get("/api/v1/products").param("active", "false"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void administratorsCanFilterByActiveStatus() throws Exception {
+        productRepository.saveAndFlush(activeProduct("KB-001", "Keyboard", "keyboard"));
+        Product hidden = activeProduct("KB-002", "Hidden", "hidden");
+        hidden.deactivate();
+        productRepository.saveAndFlush(hidden);
+
+        mockMvc.perform(get("/api/v1/products")
+                        .param("active", "false")
+                        .header(HttpHeaders.AUTHORIZATION, admin()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].sku").value("KB-002"))
+                .andExpect(jsonPath("$.content[0].active").value(false));
+
+        mockMvc.perform(get("/api/v1/products").header(HttpHeaders.AUTHORIZATION, admin()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2));
+    }
+
+    @Test
     void administratorCreatesProduct() throws Exception {
         mockMvc.perform(post("/api/v1/products")
                         .header(HttpHeaders.AUTHORIZATION, admin())
@@ -275,6 +302,7 @@ class ProductApiIntegrationTest {
                                   "slug":"keyboard",
                                   "description":"Mechanical",
                                   "price":49.50,
+                                  "currency":"EUR",
                                   "stockQuantity":5,
                                   "categoryId":%d
                                 }
@@ -286,6 +314,19 @@ class ProductApiIntegrationTest {
                 .andExpect(jsonPath("$.currency").value("EUR"))
                 .andExpect(jsonPath("$.active").value(true))
                 .andExpect(jsonPath("$.purchasable").value(true));
+    }
+
+    @Test
+    void createRequiresExplicitCurrency() throws Exception {
+        mockMvc.perform(post("/api/v1/products")
+                        .header(HttpHeaders.AUTHORIZATION, admin())
+                        .contentType(APPLICATION_JSON)
+                        .content(
+                                """
+                                {"sku":"KB-CUR","name":"Keyboard","slug":"keyboard-cur","price":10.00,"stockQuantity":1,"categoryId":%d}
+                                """.formatted(books.getId())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
     @Test
@@ -309,6 +350,7 @@ class ProductApiIntegrationTest {
                                   "name":"Bad",
                                   "slug":"bad",
                                   "price":-1,
+                                  "currency":"EUR",
                                   "stockQuantity":-3,
                                   "categoryId":%d
                                 }
@@ -347,7 +389,7 @@ class ProductApiIntegrationTest {
                         .contentType(APPLICATION_JSON)
                         .content(
                                 """
-                                {"sku":"kb-001","name":"Other","slug":"other","price":1.00,"stockQuantity":1,"categoryId":%d}
+                                {"sku":"kb-001","name":"Other","slug":"other","price":1.00,"currency":"EUR","stockQuantity":1,"categoryId":%d}
                                 """.formatted(books.getId())))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("DUPLICATE_PRODUCT_SKU"));
@@ -357,7 +399,7 @@ class ProductApiIntegrationTest {
                         .contentType(APPLICATION_JSON)
                         .content(
                                 """
-                                {"sku":"KB-002","name":"Other","slug":"keyboard","price":1.00,"stockQuantity":1,"categoryId":%d}
+                                {"sku":"KB-002","name":"Other","slug":"keyboard","price":1.00,"currency":"EUR","stockQuantity":1,"categoryId":%d}
                                 """.formatted(books.getId())))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("DUPLICATE_PRODUCT_SLUG"));
@@ -533,7 +575,7 @@ class ProductApiIntegrationTest {
 
     private static String createBody(Long categoryId) {
         return """
-                {"sku":"KB-100","name":"Keyboard","slug":"keyboard","price":49.50,"stockQuantity":5,"categoryId":%d}
+                {"sku":"KB-100","name":"Keyboard","slug":"keyboard","price":49.50,"currency":"EUR","stockQuantity":5,"categoryId":%d}
                 """.formatted(categoryId);
     }
 

@@ -1,15 +1,16 @@
 package com.example.ecommerce.common.security;
 
 import com.example.ecommerce.common.exception.ApiErrorResponse;
+import com.example.ecommerce.common.exception.ApiErrors;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.Objects;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandler;
@@ -71,6 +72,6 @@ public class SecurityProblemHandlers {
         }
         errorWriter.writeValue(
                 response.getOutputStream(),
-                new ApiErrorResponse(Instant.now(), status, code, message, request.getRequestURI()));
+                ApiErrors.of(HttpStatus.valueOf(status), code, message, request.getRequestURI()));
     }
 }

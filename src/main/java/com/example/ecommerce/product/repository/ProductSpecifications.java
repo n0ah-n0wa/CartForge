@@ -15,15 +15,24 @@ public final class ProductSpecifications {
     }
 
     public static Specification<Product> from(ProductSearchCriteria criteria) {
-        return activeOnly()
+        return activeStatus(criteria.active())
                 .and(categorySlug(criteria.categorySlug()))
                 .and(minPrice(criteria.minPrice()))
                 .and(maxPrice(criteria.maxPrice()))
                 .and(textSearch(criteria.searchTerm()));
     }
 
-    static Specification<Product> activeOnly() {
-        return (root, query, builder) -> builder.isTrue(root.get("active"));
+    /**
+     * {@code true}/{@code false} filter by status; {@code null} includes both
+     * (administrator catalog listing).
+     */
+    static Specification<Product> activeStatus(Boolean active) {
+        return (root, query, builder) -> {
+            if (active == null) {
+                return builder.conjunction();
+            }
+            return active ? builder.isTrue(root.get("active")) : builder.isFalse(root.get("active"));
+        };
     }
 
     static Specification<Product> categorySlug(String slug) {

@@ -1,6 +1,7 @@
 package com.example.ecommerce.cart.dto;
 
 import com.example.ecommerce.common.persistence.CurrencyCode;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 
 public record CartItemResponse(
@@ -9,9 +10,9 @@ public record CartItemResponse(
         String sku,
         String name,
         String slug,
-        BigDecimal unitPrice,
-        CurrencyCode currency,
+        @Schema(example = "49.50") BigDecimal unitPrice,
+        @Schema(example = "EUR") CurrencyCode currency,
         int quantity,
-        BigDecimal lineTotal
+        @Schema(example = "99.00") BigDecimal lineTotal
 ) {
 }

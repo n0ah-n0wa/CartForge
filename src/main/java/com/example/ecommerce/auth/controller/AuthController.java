@@ -10,7 +10,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import java.net.URI;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -39,7 +39,7 @@ public class AuthController {
     @ApiResponse(responseCode = "429", description = "Too many requests")
     public ResponseEntity<UserResponse> register(@Valid @RequestBody RegistrationRequest request) {
         UserResponse body = registrationService.register(request);
-        return ResponseEntity.created(URI.create("/api/v1/users/" + body.id())).body(body);
+        return ResponseEntity.status(HttpStatus.CREATED).body(body);
     }
 
     @PostMapping("/login")

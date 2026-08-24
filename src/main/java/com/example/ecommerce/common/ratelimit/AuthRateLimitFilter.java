@@ -2,6 +2,7 @@ package com.example.ecommerce.common.ratelimit;
 
 import com.example.ecommerce.common.config.ApplicationProperties;
 import com.example.ecommerce.common.exception.ApiErrorResponse;
+import com.example.ecommerce.common.exception.ApiErrors;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import jakarta.servlet.FilterChain;
@@ -9,10 +10,10 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.time.Instant;
 import java.util.Objects;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -79,9 +80,8 @@ public final class AuthRateLimitFilter extends OncePerRequestFilter {
         response.setHeader(HttpHeaders.RETRY_AFTER, Long.toString(retryAfterSeconds));
         errorWriter.writeValue(
                 response.getOutputStream(),
-                new ApiErrorResponse(
-                        Instant.now(),
-                        429,
+                ApiErrors.of(
+                        HttpStatus.TOO_MANY_REQUESTS,
                         "RATE_LIMIT_EXCEEDED",
                         "Too many requests. Try again later.",
                         request.getRequestURI()));

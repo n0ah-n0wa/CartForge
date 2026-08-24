@@ -72,6 +72,11 @@ public class CategoryService {
         }
     }
 
+    @CacheEvict(cacheNames = CatalogCaches.CATEGORIES, allEntries = true)
+    public CategoryResponse createResponse(CreateCategoryCommand command) {
+        return categoryMapper.toResponse(create(command));
+    }
+
     /**
      * Category identity is embedded in product responses, so product caches must
      * be cleared when a category changes.
@@ -99,6 +104,16 @@ public class CategoryService {
             @CacheEvict(cacheNames = CatalogCaches.PRODUCT, allEntries = true),
             @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
     })
+    public CategoryResponse updateResponse(Long id, UpdateCategoryCommand command) {
+        return categoryMapper.toResponse(update(id, command));
+    }
+
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORY, key = "#id"),
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORIES, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public Category patch(Long id, PatchCategoryCommand command) {
         Category category = require(id);
         String nextName = command.name() != null ? command.name() : category.getName();
@@ -110,6 +125,16 @@ public class CategoryService {
         } catch (DataIntegrityViolationException duplicate) {
             throw translateDuplicate(duplicate, nextName, nextSlug);
         }
+    }
+
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORY, key = "#id"),
+            @CacheEvict(cacheNames = CatalogCaches.CATEGORIES, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, allEntries = true),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
+    public CategoryResponse patchResponse(Long id, PatchCategoryCommand command) {
+        return categoryMapper.toResponse(patch(id, command));
     }
 
     @Caching(evict = {
