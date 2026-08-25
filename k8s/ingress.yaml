@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cartforge-api
+  namespace: cartforge
+  labels:
+    app.kubernetes.io/name: cartforge-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: cartforge
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: cartforge.local
+      http:
+        paths:
+          # Expose only the public API. Probes and metrics stay on the pod network.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: cartforge-api
+                port:
+                  name: http

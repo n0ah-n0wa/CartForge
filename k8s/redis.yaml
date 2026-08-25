@@ -1,0 +1,101 @@
+# Demo in-cluster Redis — not a production-managed cache service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cartforge-redis
+  namespace: cartforge
+  labels:
+    app.kubernetes.io/name: cartforge-redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: cartforge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cartforge-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cartforge-redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: cartforge
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            - redis-server
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cartforge-redis
+  namespace: cartforge
+  labels:
+    app.kubernetes.io/name: cartforge-redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: cartforge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cartforge-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

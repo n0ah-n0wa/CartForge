@@ -1,0 +1,125 @@
+# Demo in-cluster PostgreSQL — not a production-managed database service.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cartforge-postgres-data
+  namespace: cartforge
+  labels:
+    app.kubernetes.io/name: cartforge-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: cartforge
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cartforge-postgres
+  namespace: cartforge
+  labels:
+    app.kubernetes.io/name: cartforge-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: cartforge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cartforge-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cartforge-postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: cartforge
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: ecommerce
+            - name: POSTGRES_USER
+              value: ecommerce
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cartforge-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - ecommerce
+                - -d
+                - ecommerce
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - ecommerce
+                - -d
+                - ecommerce
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: cartforge-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cartforge-postgres
+  namespace: cartforge
+  labels:
+    app.kubernetes.io/name: cartforge-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: cartforge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cartforge-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

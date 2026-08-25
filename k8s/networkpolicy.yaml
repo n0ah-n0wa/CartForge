@@ -1,0 +1,48 @@
+# Restrict demo data stores to the API pods in this namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cartforge-postgres
+  namespace: cartforge
+  labels:
+    app.kubernetes.io/name: cartforge-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: cartforge
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cartforge-postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cartforge-api
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cartforge-redis
+  namespace: cartforge
+  labels:
+    app.kubernetes.io/name: cartforge-redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: cartforge
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cartforge-redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cartforge-api
+      ports:
+        - protocol: TCP
+          port: 6379

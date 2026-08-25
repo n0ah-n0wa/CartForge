@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cartforge-api
+  namespace: cartforge
+  labels:
+    app.kubernetes.io/name: cartforge-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: cartforge
+data:
+  SPRING_PROFILES_ACTIVE: "prod"
+  SERVER_PORT: "8080"
+  LOGGING_LEVEL_ROOT: "INFO"
+  DATABASE_URL: "jdbc:postgresql://cartforge-postgres:5432/ecommerce"
+  DATABASE_USERNAME: "ecommerce"
+  REDIS_URL: "redis://cartforge-redis:6379"
+  JWT_EXPIRATION: "3600000"
+  CORS_ORIGINS: "http://cartforge.local"
+  APP_PAGINATION_DEFAULT_PAGE_SIZE: "20"
+  APP_PAGINATION_MAX_PAGE_SIZE: "100"
+  APP_RATE_LIMIT_AUTH_ENABLED: "true"
+  APP_RATE_LIMIT_AUTH_LIMIT: "20"
+  APP_RATE_LIMIT_AUTH_WINDOW_SECONDS: "60"
+  JAVA_OPTS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8"
