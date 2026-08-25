@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (mandated by `SPECIFICATIONS.md` v1.0.0)
 - **Date:** 2026-08-22
-- **Implementation:** not started
+- **Implementation:** Helm chart and CD workflows landed (CI → Publish Image → CD)
 
 ## Context
 

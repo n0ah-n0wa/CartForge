@@ -1,0 +1,186 @@
+# Publish CartForge runtime image to GitHub Container Registry (GHCR).
+#
+# Runs after a successful CI workflow on main. Produces:
+#   ghcr.io/<owner>/ecommerce-api:<git-sha>   (immutable; prefer for deploy)
+#   ghcr.io/<owner>/ecommerce-api:latest      (convenience only; main only)
+#
+# Authentication uses the job GITHUB_TOKEN. Credentials are never printed.
+
+name: Publish Image
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      git_sha:
+        description: Full git SHA to build and publish (must exist on the default branch)
+        required: true
+        type: string
+
+concurrency:
+  group: publish-image-${{ github.event.workflow_run.head_sha || inputs.git_sha || github.sha }}
+  cancel-in-progress: false
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ecommerce-api
+
+jobs:
+  publish:
+    name: Build and push GHCR image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+
+    outputs:
+      image: ${{ steps.image.outputs.repository }}
+      digest: ${{ steps.build.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Resolve source revision
+        id: rev
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            SHA="${{ inputs.git_sha }}"
+            RUN_ID=""
+          else
+            SHA="${{ github.event.workflow_run.head_sha }}"
+            RUN_ID="${{ github.event.workflow_run.id }}"
+          fi
+
+          if [[ ! "${SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Refusing to publish: expected a full 40-character git SHA, got '${SHA}'" >&2
+            exit 1
+          fi
+
+          echo "sha=${SHA}" >> "${GITHUB_OUTPUT}"
+          echo "short_sha=${SHA:0:12}" >> "${GITHUB_OUTPUT}"
+          echo "run_id=${RUN_ID}" >> "${GITHUB_OUTPUT}"
+          echo "Publishing revision ${SHA}"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.rev.outputs.sha }}
+          fetch-depth: 1
+
+      - name: Download verified JAR from CI
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: application-jar
+          path: target
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.rev.outputs.run_id }}
+
+      - name: Set up Java 21
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Package JAR for manual publish
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          chmod +x mvnw
+          ./mvnw -B -DskipTests package
+
+      - name: Verify JAR artifact
+        run: |
+          set -euo pipefail
+          ls -la target/
+          test -n "$(ls target/ecommerce-api-*.jar)"
+          test -s "$(ls target/ecommerce-api-*.jar | head -n 1)"
+
+      - name: Lowercase image repository
+        id: image
+        run: |
+          set -euo pipefail
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "repository=${{ env.REGISTRY }}/${OWNER}/${{ env.IMAGE_NAME }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.repository }}
+          tags: |
+            type=raw,value=${{ steps.rev.outputs.sha }}
+            type=raw,value=latest,enable=${{ github.event_name == 'workflow_run' }}
+          labels: |
+            org.opencontainers.image.title=CartForge E-Commerce API
+            org.opencontainers.image.description=Production-oriented Spring Boot e-commerce REST API
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.rev.outputs.sha }}
+            org.opencontainers.image.vendor=CartForge
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      - name: Summarize published image
+        run: |
+          set -euo pipefail
+          {
+            echo "## Published image"
+            echo ""
+            echo "- Repository: \`${{ steps.image.outputs.repository }}\`"
+            echo "- Immutable tag: \`${{ steps.rev.outputs.sha }}\`"
+            if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+              echo "- Convenience tag: \`latest\`"
+            fi
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo ""
+            echo "Kubernetes / Helm example:"
+            echo ""
+            echo '```bash'
+            echo "helm upgrade --install cartforge ./helm/cartforge \\"
+            echo "  -f helm/cartforge/values-prod.yaml \\"
+            echo "  --set image.repository=${{ steps.image.outputs.repository }} \\"
+            echo "  --set image.tag=${{ steps.rev.outputs.sha }}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -1,189 +1,225 @@
 # Deployment
 
-**Status:** planned. There is no Dockerfile, Compose file, Helm chart, Kubernetes manifest, or GitHub Actions workflow in this repository yet.
-
-This document describes the delivery model required by `SPECIFICATIONS.md`. Commands below are the specified targets, not a working runbook for the current tree.
+This document describes how CartForge is packaged and delivered. Delivery artifacts
+live in the repository: Docker image, Compose stack, Kubernetes manifests, Helm
+chart, and GitHub Actions workflows.
 
 ## Local stack
 
-Specified Compose services: `application`, `postgres`, `redis`.
-
-Intended flow, after those files exist:
-
 ```bash
 cp .env.example .env
+./mvnw package -DskipTests
 docker compose up --build
 ```
 
-The application must take database, Redis, JWT, CORS, port, and logging settings from the environment. See `.env.example`.
-
-Development may use local PostgreSQL, local Redis, optional seed data, verbose logging, and Swagger UI. Production must disable development seed data, use external secrets, restrict CORS, and avoid exposing sensitive Actuator endpoints.
+Compose services: `application`, `postgres`, `redis`. Configuration comes from
+environment variables (see `.env.example`).
 
 ## Container image
 
-Specified Dockerfile properties:
+Production image properties:
 
-- multi-stage build;
-- minimal runtime image;
-- non-root execution;
-- configurable JVM options;
+- multi-stage build (`Dockerfile`);
+- non-root runtime (UID 10001);
 - no secrets in the image;
-- deterministic build;
-- only what is required to run the application;
-- application port only;
-- SIGTERM and graceful shutdown (stop new requests, finish in-flight work within a timeout, close PostgreSQL and Redis connections).
+- readiness/liveness health checks;
+- SIGTERM / graceful shutdown.
 
-Recommended image reference:
+Published image reference:
 
 ```text
 ghcr.io/<owner>/ecommerce-api:<git-sha>
 ```
 
-Optional `latest` may be published for development convenience. Production-style deploys must prefer the immutable SHA tag.
-
-## Kubernetes
-
-Required resources:
+Optional convenience tag on successful main publishes:
 
 ```text
-Namespace
-Deployment
-Service
-ConfigMap
-Secret
-Ingress
+ghcr.io/<owner>/ecommerce-api:latest
 ```
 
-Deployment requirements:
+Production deploys must use the immutable SHA tag, never `latest`.
 
-- default `replicas: 2`;
-- rolling updates;
-- readiness probe: `/actuator/health/readiness`;
-- liveness probe: `/actuator/health/liveness`;
-- resource requests and limits;
-- environment injection;
-- graceful termination;
-- no planned full downtime when replacing healthy replicas;
-- unready pods must not receive traffic.
-
-Container security, where practical:
-
-- run as non-root;
-- read-only root filesystem (JVM `/tmp` will need a writable volume such as `emptyDir`);
-- drop unnecessary Linux capabilities;
-- no privileged mode;
-- explicit resource limits.
-
-Secrets must not be stored in ordinary ConfigMaps.
-
-PostgreSQL and Redis may be deployed as in-cluster resources for a portfolio environment. Charts and this document must keep calling that **demo infrastructure**. It is not a production-managed database service.
-
-The specification does not name a target cluster. When CD is implemented, kubeconfig or equivalent credentials must come from GitHub Actions secrets (or an equivalent secret store). A workflow must not report a successful deploy unless a real rollout was observed.
-
-## Helm
-
-Specified chart layout:
+## CI / CD chain
 
 ```text
-Chart.yaml
-values.yaml
-values-dev.yaml
-values-prod.yaml
-templates/
-  deployment.yaml
-  service.yaml
-  configmap.yaml
-  secret.yaml
-  ingress.yaml
-  serviceaccount.yaml
-  _helpers.tpl
+CI (pull_request + push to main)
+  → ./mvnw verify
+  → Docker build (no push)
+  → Helm lint / template
+
+Publish Image (after successful CI on main)
+  → build from verified JAR
+  → push ghcr.io/<owner>/ecommerce-api:<sha> (+ latest)
+
+CD (after successful Publish Image on main)
+  → Helm lint
+  → Helm template (immutable SHA tag)
+  → helm upgrade --install --atomic --wait
+  → kubectl rollout status
+  → post-deployment smoke test (`scripts/ci/smoke-test.sh`)
 ```
 
-Only resources that are actually required should be included. The list above is the specified starting set.
+A failed rollout or smoke test fails the CD workflow. Helm `--atomic`
+rolls the release back when the upgrade does not become ready.
 
-Configurable values must include: `replicaCount`, `image.repository`, `image.tag`, `service.port`, `ingress.enabled`, `resources`, database configuration, Redis configuration, and environment variables.
+### Post-deployment smoke test
 
-Default resource values must be reasonable for a local or demo cluster and remain overridable:
+`scripts/ci/smoke-test.sh` runs against the Service via `kubectl port-forward`
+and must succeed for CD to pass:
 
-```yaml
-resources:
-  requests:
-    cpu:
-    memory:
-  limits:
-    cpu:
-    memory:
-```
+| Check | How |
+|---|---|
+| Application ready | `/actuator/health/readiness` → `UP` (includes PostgreSQL `db` probe) |
+| Health | `/actuator/health` and `/actuator/health/liveness` → `UP` |
+| Public catalog | `GET /api/v1/categories`, `GET /api/v1/products` → `200` |
+| Authentication | `POST /api/v1/auth/login` with unknown credentials → `401` (or `429`) |
+| Database | Covered by readiness (`db` in readiness group); auth login also hits the user store |
+| Redis | Not required for readiness. Catalog/auth success with Redis up **or** fail-open is acceptable |
 
-`templates/secret.yaml` is required. Real secret values must not be committed. Planned approach: template the Secret from values or an external source; commit placeholders only; inject production values with `--set`, sealed secrets, or a cluster-managed Secret.
-
-CI must run:
+Local usage against a running stack:
 
 ```bash
-helm lint
-helm template
+./scripts/ci/smoke-test.sh http://localhost:8080
 ```
 
-Generated manifests must be syntactically valid.
+Workflow files:
 
-See [ADR 0006](adr/0006-helm-kubernetes-deployment.md).
+- `.github/workflows/ci.yml`
+- `.github/workflows/publish-image.yml`
+- `.github/workflows/cd.yml`
 
-## CI/CD
+## Required GitHub configuration
 
-### Continuous integration
+CD uses the GitHub Environment named `production`. Create it under
+**Settings → Environments → production**.
 
-GitHub Actions on pull requests and pushes. Specified pipeline:
+### Secrets (GitHub Environment `production`)
 
-```text
-Checkout
-  → Set up Java
-  → Restore Maven cache
-  → Compile
-  → Unit tests
-  → Integration tests
-  → Static analysis
-  → Package
-  → Docker build
-```
-
-The Java quality gate is `./mvnw verify`. The pipeline fails if any mandatory gate fails. Workflow permissions follow least privilege. Secrets are stored as GitHub Actions secrets and must not be printed. Third-party actions should be pinned to stable versions or commit SHAs.
-
-### Continuous delivery
-
-After successful CI on `main`:
-
-```text
-Build
-  → Test
-  → Build Docker image
-  → Tag image
-  → Push to GHCR
-  → Helm lint
-  → Helm template
-  → Deploy to Kubernetes
-  → Wait for rollout
-  → Verify deployment
-```
-
-Deployment failure fails the workflow.
-
-Additional infrastructure gates: `docker build`, `helm lint`, `helm template`.
-
-## Configuration by environment
-
-| Topic | Development | Production |
+| Name | Required | Description |
 |---|---|---|
-| Data stores | Local or Compose PostgreSQL and Redis | Externalized connection settings; demo in-cluster stores only if explicitly chosen |
-| Seed data | Optional, documented as dev-only | Must not load automatically |
-| JWT | From environment | Secure external secret |
-| CORS | Configured local origins | Explicit allowlist |
-| Logging | May be verbose | Appropriate production level; no secrets |
-| Actuator | Health, liveness, readiness, Prometheus scrape | Same endpoints; no env/heapdump/beans; health details never shown |
-| Image tag | May use `latest` for convenience | SHA tag |
+| `KUBE_CONFIG` | yes | Kubeconfig for the target cluster. Accepts raw YAML **or** base64-encoded YAML. Never commit this value. |
 
-## Health and shutdown
+The workflow authenticates to GHCR for image *publishing* with `GITHUB_TOKEN`
+(Publish Image workflow). CD does not need registry push credentials.
 
-The application must not receive production traffic before readiness succeeds. Graceful shutdown is required for rolling updates.
+Do **not** store `JWT_SECRET`, database passwords, or other application secrets
+in GitHub Actions if they belong in the cluster Secret (see below).
+
+### Variables (GitHub Environment `production`)
+
+All variables are optional unless noted. When unset, Helm falls back to
+`values-prod.yaml` defaults / chart defaults.
+
+| Name | Required | Default | Description |
+|---|---|---|---|
+| `KUBE_NAMESPACE` | no | `cartforge` | Target namespace (`helm --create-namespace`) |
+| `HELM_RELEASE_NAME` | no | `cartforge` | Helm release name |
+| `APP_SECRET_NAME` | no | `cartforge-secrets` | Existing Kubernetes Secret with app credentials |
+| `DATABASE_URL` | recommended | (values-prod) | JDBC URL for PostgreSQL |
+| `DATABASE_HOST` | no | (values-prod) | Host used when URL is constructed / wait init |
+| `DATABASE_USERNAME` | no | (values-prod) | Database username (password stays in the cluster Secret) |
+| `REDIS_URL` | recommended | (values-prod) | Redis connection URL |
+| `REDIS_HOST` | no | (values-prod) | Redis host |
+| `CORS_ORIGINS` | recommended | (values-prod) | Explicit CORS allowlist |
+| `INGRESS_HOST` | recommended | (values-prod) | Ingress hostname |
+| `IMAGE_PULL_SECRET_NAME` | if GHCR private | unset | Name of a pre-created `imagePullSecret` in the namespace |
+
+### Repository permissions
+
+Workflows use least privilege:
+
+| Workflow | Permissions |
+|---|---|
+| CI | `contents: read` |
+| Publish Image | `contents: read`, `packages: write`, `actions: read` |
+| CD | `contents: read` (+ environment secrets) |
+
+## Required Kubernetes configuration
+
+Provision these in the cluster **before** enabling CD. Nothing below belongs in Git.
+
+### Namespace
+
+```bash
+kubectl create namespace cartforge
+```
+
+(CD can also create the namespace via Helm `--create-namespace`.)
+
+### Application Secret
+
+The chart expects an existing Secret (CD sets `secrets.create=false`):
+
+```bash
+kubectl create secret generic cartforge-secrets \
+  --namespace cartforge \
+  --from-literal=POSTGRES_PASSWORD='...' \
+  --from-literal=JWT_SECRET='...'   # >= 32 characters, non-placeholder
+```
+
+Keys must match chart defaults (`POSTGRES_PASSWORD`, `JWT_SECRET`) unless you
+override `secrets.postgresPasswordKey` / `secrets.jwtSecretKey`.
+
+### Image pull (private GHCR packages)
+
+If the package is private, create a pull secret and set
+`IMAGE_PULL_SECRET_NAME` in the GitHub Environment:
+
+```bash
+kubectl create secret docker-registry ghcr-pull \
+  --namespace cartforge \
+  --docker-server=ghcr.io \
+  --docker-username='<github-username>' \
+  --docker-password='<PAT with read:packages>'
+```
+
+### Data stores
+
+CD assumes **externally managed** PostgreSQL and Redis (connection settings via
+GitHub variables / `values-prod.yaml`). In-cluster Postgres/Redis in the chart
+are **demo infrastructure only** and stay disabled in production values.
+
+### Ingress
+
+An Ingress controller compatible with `ingressClassName: nginx` (or override via
+values) must already exist. CD does not install an ingress controller.
+
+## Manual deploy
+
+After an image exists in GHCR:
+
+```bash
+# GitHub Actions → CD → Run workflow → supply full git SHA
+```
+
+Or locally (with kubeconfig and cluster Secret already present):
+
+```bash
+helm upgrade --install cartforge ./helm/cartforge \
+  -n cartforge --create-namespace \
+  -f helm/cartforge/values-prod.yaml \
+  --set image.repository=ghcr.io/<owner>/ecommerce-api \
+  --set image.tag=<git-sha> \
+  --set secrets.create=false \
+  --set secrets.existingSecret=cartforge-secrets \
+  --atomic --wait --timeout 10m
+
+kubectl rollout status deployment/cartforge -n cartforge
+```
+
+## Rolling updates
+
+The chart defaults to:
+
+- `replicas: 2`
+- `maxSurge: 1`, `maxUnavailable: 0`
+- readiness `/actuator/health/readiness`
+- liveness `/actuator/health/liveness`
+- `terminationGracePeriodSeconds: 35`
+- `preStop` delay before SIGTERM handling
+
+Unready pods do not receive Service traffic. CD fails if rollout or readiness
+verification does not succeed.
 
 ## Related documents
 

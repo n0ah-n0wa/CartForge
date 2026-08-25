@@ -145,7 +145,7 @@ jobs:
 
           sudo apt-get update
           sudo apt-get install -y python3-yaml
-          python3 - <<'PY'
+          python3 - /tmp/cartforge-dev.yaml /tmp/cartforge-prod.yaml <<'PY'
           import sys
           import yaml
 
@@ -155,8 +155,7 @@ jobs:
               if not docs:
                   raise SystemExit(f"{path} rendered no Kubernetes documents")
               print(f"{path}: {len(docs)} documents")
-
-          PY /tmp/cartforge-dev.yaml /tmp/cartforge-prod.yaml
+          PY
 
           grep -q '^kind: Deployment' /tmp/cartforge-dev.yaml
           grep -q '^kind: Deployment' /tmp/cartforge-prod.yaml
