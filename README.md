@@ -1,70 +1,68 @@
 # CartForge
 
-**Status:** implementation in progress. This repository currently contains the authoritative specification and the documentation foundation. The application, tests, containers, and delivery pipelines have not been implemented yet.
+Production-style e-commerce REST API implemented as a Java 21 modular monolith on Spring Boot 3.5.
 
-CartForge is a production-style REST API for an online store. The intended system is a Java 21 modular monolith built with Spring Boot. `SPECIFICATIONS.md` is the source of truth for functional and technical requirements.
-
-Do not treat this README as a claim that catalog, authentication, cart, checkout, or deployment already work.
+`SPECIFICATIONS.md` is the authoritative requirements document. This README describes the **current** repository state.
 
 ## Overview
 
-The specified system is a versioned HTTP API (`/api/v1`) that must support:
+CartForge exposes a versioned HTTP API under `/api/v1` for:
 
 - customer registration and JWT authentication;
 - role-based authorization (`CUSTOMER`, `ADMIN`);
-- product and category management;
-- search, filtering, sorting, and pagination;
+- product and category catalog management;
+- product search, filtering, sorting, and pagination;
 - shopping carts and transactional checkout;
 - order lifecycle and inventory consistency;
 - PostgreSQL persistence with Flyway migrations;
-- Redis as a cache, not as the source of truth;
+- Redis catalog caching with fail-open behaviour;
 - Docker, Kubernetes, Helm, and GitHub Actions delivery.
 
-The architecture is a **modular monolith**, not a microservice system.
+Architecture is a **modular monolith** (one deployable process), not a microservice system.
 
-Out of scope: real payment processing, card storage, shipping providers, email/SMS, search engines, Kafka, frontend, and mobile clients. See `SPECIFICATIONS.md` section 4.
+**Out of scope:** real payment processing, card storage, shipping providers, email/SMS, external search engines, Kafka, frontend, and mobile clients.
 
 ## Architecture
 
-All business domains run in one Spring Boot process. PostgreSQL stores durable state. Redis caches read-heavy catalog data and must not make the API unusable when it is down.
+All business domains run in one Spring Boot process. PostgreSQL is the durable source of truth. Redis caches read-heavy catalog data and must not take the API offline when unavailable.
 
 ```text
                          ┌─────────────────────┐
                          │       Client        │
-                         │ Browser / Postman   │
-                         │ Swagger / API Tests │
                          └──────────┬──────────┘
-                                    │
                                     ▼
                          ┌─────────────────────┐
                          │ Ingress / HTTP      │
                          └──────────┬──────────┘
-                                    │
                                     ▼
                   ┌──────────────────────────────────┐
                   │          Spring Boot API         │
-                  │                                  │
-                  │  Authentication                  │
-                  │  Users                           │
-                  │  Products                        │
-                  │  Categories                      │
-                  │  Cart                            │
-                  │  Orders                          │
-                  │  Inventory                       │
-                  │  Administration                 │
+                  │  auth · category · product       │
+                  │  cart · order · inventory        │
+                  │  common (security, errors, …)    │
                   └───────────────┬──────────────────┘
-                                  │
                     ┌─────────────┴─────────────┐
-                    │                           │
                     ▼                           ▼
              ┌─────────────┐             ┌─────────────┐
              │ PostgreSQL  │             │    Redis    │
-             │ Persistent  │             │ Cache       │
-             │ Data        │             │             │
+             │ (source of  │             │ (cache /    │
+             │  truth)     │             │  rate limit)│
              └─────────────┘             └─────────────┘
 ```
 
-Code organization is package-by-feature under `com.example.ecommerce` (`auth`, `user`, `category`, `product`, `cart`, `order`, `inventory`, `common`). Inventory is an internal service over product stock, not a separate HTTP resource.
+Package layout (feature-oriented):
+
+```text
+src/main/java/com/example/ecommerce/
+├── auth/          # register, login, JWT
+├── user/          # user persistence and DTOs (no public profile controller yet)
+├── category/
+├── product/
+├── cart/
+├── order/         # customer checkout + /api/v1/admin/orders
+├── inventory/     # internal stock operations (no dedicated HTTP API)
+└── common/        # security, errors, pagination, cache, logging, config
+```
 
 Details: [docs/architecture.md](docs/architecture.md). Decisions: [docs/adr/](docs/adr/).
 
@@ -73,190 +71,440 @@ Details: [docs/architecture.md](docs/architecture.md). Decisions: [docs/adr/](do
 | Area | Technology |
 |---|---|
 | Language | Java 21 |
-| Framework | Spring Boot 3.x |
-| Build | Maven |
-| Web | Spring Web / Spring MVC |
-| Persistence | Spring Data JPA, Hibernate |
-| Database | PostgreSQL |
-| Migrations | Flyway |
-| Security | Spring Security, JWT |
+| Framework | Spring Boot 3.5.x |
+| Build | Maven Wrapper (`./mvnw`) |
+| Web | Spring MVC |
+| Persistence | Spring Data JPA, Hibernate (`ddl-auto=validate`) |
+| Database | PostgreSQL 16 |
+| Migrations | Flyway (`V1`–`V10`) |
+| Security | Spring Security OAuth2 resource server (JWT HS256) |
+| Passwords | Delegating `PasswordEncoder` (BCrypt by default) |
 | Validation | Jakarta Bean Validation |
-| Cache | Spring Cache + Redis |
-| API documentation | Springdoc OpenAPI |
+| Cache | Spring Cache + Redis (fail-open) |
+| Rate limiting | Redis fixed-window on auth endpoints (fail-open) |
+| API docs | Springdoc OpenAPI (enabled in `dev`) |
 | Tests | JUnit 5, Mockito, Testcontainers |
 | Quality | Checkstyle, SpotBugs |
-| Local orchestration | Docker Compose |
-| Runtime packaging | Docker |
-| Orchestration | Kubernetes |
-| Packaging | Helm |
-| CI/CD | GitHub Actions |
-| Registry | GitHub Container Registry (GHCR) |
-| Health / metrics | Spring Boot Actuator |
-
-These technologies are required by the specification. They are not present as a runnable project in this repository yet.
+| Containers | Docker, Docker Compose |
+| Orchestration | Kubernetes, Helm |
+| CI/CD | GitHub Actions → GHCR |
 
 ## Features
 
-The following capabilities are **specified**, not implemented:
+Implemented today:
 
-- registration and login with hashed passwords and JWT access tokens;
-- public catalog reads; administrative catalog writes;
-- product search, filters, allowlisted sorting, and pagination;
-- customer cart operations;
-- transactional checkout with order-item snapshots and inventory decrement;
-- order history, customer cancellation where allowed, administrative status updates;
-- optimistic locking on concurrent stock updates;
-- Redis cache for product and category reads, with graceful degradation;
-- idempotency for order creation;
-- rate limiting on authentication endpoints;
-- centralized JSON errors, correlation IDs, and Actuator health probes.
+- Registration and login; passwords hashed; JWT access tokens (`Authorization: Bearer`)
+- Public catalog reads; admin catalog writes (`@RequireAdmin`)
+- Product search (`category`, `minPrice`/`maxPrice`, `search`, allowlisted `sort`, pagination)
+- Customer cart CRUD
+- Transactional checkout with order-line snapshots, stock decrement, cart clear
+- Checkout `Idempotency-Key` (PostgreSQL-backed)
+- Order history, customer cancel (`PENDING`/`CONFIRMED`), admin status updates
+- Optimistic locking on concurrent inventory updates
+- Redis cache for catalog reads; graceful degradation when Redis is down
+- Auth rate limiting on login/register
+- Centralized JSON errors, correlation IDs, Actuator health/liveness/readiness, Prometheus scrape endpoint
 
-Nothing in this list is available as a running API today.
+Not implemented:
 
-## Local Development
+- Dedicated user-profile HTTP API
+- Automatic development seed data / demo users
+- Real payment, shipping, or notification integrations
 
-**Current state:** the Maven / Spring Boot foundation compiles. There is no Docker Compose file yet, and no business API to exercise. Starting the process still requires PostgreSQL and Redis.
+## Prerequisites
 
-The specified local flow, once Compose exists, is:
+- Java 21
+- Docker (Compose for local stack; Docker required for Testcontainers in CI/tests)
+- Maven Wrapper (committed; no global Maven install required)
+- Optional: `kubectl`, Helm 3.x for cluster work
+
+## Local Setup
 
 ```bash
 git clone <repository-url>
+cd CartForge
 cp .env.example .env
+# Edit .env: set POSTGRES_PASSWORD and JWT_SECRET (JWT_SECRET ≥ 32 characters)
+./mvnw package -DskipTests
 docker compose up --build
 ```
 
-### Prerequisites (planned)
+API: `http://localhost:8080`  
+Swagger UI (`dev` profile): `http://localhost:8080/swagger-ui.html`  
+OpenAPI JSON: `http://localhost:8080/v3/api-docs`
 
-- Java 21
-- Maven Wrapper (`./mvnw` or `mvnw.cmd`)
-- Docker (required for the current Testcontainers suite; Compose is not added yet)
-- access to the environment variables listed in `.env.example`
+Smoke check against a running stack:
 
-### Environment variables
+```bash
+./scripts/ci/smoke-test.sh http://localhost:8080
+```
 
-Copy `.env.example` to `.env`. Replace every `change-me` placeholder. Never commit `.env`. Spring Boot does not load `.env` automatically; export the variables or pass them into the process.
+### Run without Compose
 
-| Variable | Purpose | Notes |
-|---|---|---|
-| `SPRING_PROFILES_ACTIVE` | `dev`, `test`, or `prod` | Required. There is no implicit default profile. |
-| `SERVER_PORT` | HTTP port | Defaults to `8080` outside production-required checks |
-| `LOGGING_LEVEL_ROOT` | Root log level | `INFO` in dev/test; production defaults to `WARN` if unset in that file’s logging block |
-| `DATABASE_URL` | JDBC URL | Localhost fallback in `dev` only |
-| `DATABASE_USERNAME` | Database user | Localhost fallback in `dev` only |
-| `DATABASE_PASSWORD` | Database password | Required in every profile; no committed default |
-| `REDIS_URL` | Redis connection | Localhost fallback in `dev` only |
-| `JWT_SECRET` | Token signing secret | Required; placeholder only until JWT is implemented. Production rejects placeholders and short values. |
-| `JWT_EXPIRATION` | Access token lifetime (ms) | Optional except in `prod` (default `3600000` in other profiles) |
-| `CORS_ORIGINS` | Comma-separated allowlist | Local default only in `dev`/`test`. Required in `prod`. `*` is rejected in `prod`. |
-| `APP_PAGINATION_DEFAULT_PAGE_SIZE` | Default page size | Default `20` |
-| `APP_PAGINATION_MAX_PAGE_SIZE` | Maximum page size | Default `100`; must be >= default |
+Provide reachable PostgreSQL and Redis, export variables from `.env.example` (use `localhost` URLs), then:
 
-Profiles `dev`, `test`, and `prod` are implemented as `application-*.yml`. Production does not inherit development localhost or secret fallbacks.
+```bash
+export SPRING_PROFILES_ACTIVE=dev
+./mvnw spring-boot:run
+```
 
-### Database migrations
+## Docker Compose
 
-Flyway will own the schema. Production configuration must use Hibernate `ddl-auto=validate` (or equivalent). Migration files are not in the repository yet.
+Services: `application`, `postgres`, `redis` on network `cartforge`, with health checks and a persistent `postgres_data` volume.
 
-### Running the application
+```bash
+cp .env.example .env          # set secrets
+./mvnw package -DskipTests    # Dockerfile copies target/ecommerce-api-*.jar
+docker compose up --build
+```
 
-The process can be compiled with `./mvnw compile` and the foundation tests with `./mvnw test` (Docker required for Testcontainers).
+Default image build uses host-built JAR (`Dockerfile`). For in-Docker Maven builds (CI-friendly networks), set `DOCKERFILE=docker/Dockerfile.ci` in `.env`.
 
-`./mvnw spring-boot:run` still needs reachable PostgreSQL and Redis. The intended Compose stack is `application`, `postgres`, and `redis`; Compose is not in the repository yet.
+If you change `POSTGRES_PASSWORD` after the volume was initialized:
 
-### Swagger
+```bash
+docker compose down -v && docker compose up --build
+```
 
-OpenAPI / Swagger UI will be generated by Springdoc when the API exists. The UI path will be documented here after that implementation lands. Do not assume a live documentation endpoint today.
+## Environment Variables
+
+Copy `.env.example` → `.env`. Never commit `.env`. Compose loads `.env` for substitution and injects it via `env_file`. Spring Boot does not load `.env` by itself for non-Compose runs.
+
+| Variable | Purpose |
+|---|---|
+| `SPRING_PROFILES_ACTIVE` | `dev`, `test`, or `prod` (set explicitly) |
+| `SERVER_PORT` | HTTP port (default `8080`) |
+| `LOGGING_LEVEL_ROOT` | Root log level |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Compose Postgres bootstrap |
+| `DATABASE_URL` / `DATABASE_USERNAME` / `DATABASE_PASSWORD` | Application JDBC |
+| `REDIS_URL` | Redis connection |
+| `JWT_SECRET` | HS256 signing secret (≥ 32 chars; prod rejects placeholders) |
+| `JWT_EXPIRATION` | Access token lifetime in ms (default `3600000`) |
+| `CORS_ORIGINS` | Comma-separated origin allowlist (`*` rejected in `prod`) |
+| `APP_PAGINATION_DEFAULT_PAGE_SIZE` | Default page size (default `20`) |
+| `APP_PAGINATION_MAX_PAGE_SIZE` | Max page size (default `100`) |
+| `APP_RATE_LIMIT_AUTH_ENABLED` | Auth rate limiter on/off |
+| `APP_RATE_LIMIT_AUTH_LIMIT` | Max requests per window |
+| `APP_RATE_LIMIT_AUTH_WINDOW_SECONDS` | Window length |
+| `JAVA_OPTS` | Optional JVM flags for the container |
+| `DOCKERFILE` | Compose build Dockerfile override |
+
+Compose service DNS: `postgres`, `redis`. Localhost URLs are for non-Docker runs only.
+
+## Database Migrations
+
+Flyway owns schema changes under `src/main/resources/db/migration/`:
+
+| Version | Purpose |
+|---|---|
+| `V1` | Schema baseline |
+| `V2` | Users |
+| `V3` | Categories |
+| `V4` | Products |
+| `V5` | Carts |
+| `V6` | Orders |
+| `V7` | Product search support |
+| `V8` | Categories active index |
+| `V9` | Order number sequence |
+| `V10` | Checkout idempotency keys |
+
+Hibernate `ddl-auto` is `validate` in all profiles. Migrations run on application startup. Do not edit committed migrations.
+
+Details: [docs/database.md](docs/database.md).
 
 ## Testing
 
-**Current state:** the foundation suite is a Spring context smoke test against Testcontainers PostgreSQL and Redis.
-
-The specified Java quality gate is:
+Authoritative quality gate:
 
 ```bash
 ./mvnw verify
 ```
 
-That command must eventually run compile, unit tests, integration tests (Testcontainers for PostgreSQL and Redis where required), static analysis, and packaging. CI must use the same command.
+Runs compile, unit and integration tests (Testcontainers PostgreSQL/Redis where required), packaging, Checkstyle, and SpotBugs.
 
-Additional infrastructure gates, once those artifacts exist: `docker build`, `helm lint`, `helm template`.
+Useful variants:
 
-## Docker
+```bash
+./mvnw test                 # unit + integration tests
+./mvnw -DskipTests package  # JAR only (for Docker image build)
+./scripts/ci/validate-local.sh   # verify + Docker build + Helm lint/template (Unix)
+```
 
-**Current state:** no Dockerfile or Compose file.
+Docker must be available for Testcontainers-based integration tests.
 
-The specification requires a multi-stage, non-root, secret-free production image and a Compose file that starts the application, PostgreSQL, and Redis.
+## Swagger / OpenAPI
 
-## Kubernetes
+Enabled when `SPRING_PROFILES_ACTIVE=dev`:
 
-**Current state:** no manifests.
+| Resource | URL |
+|---|---|
+| Swagger UI | `/swagger-ui.html` |
+| OpenAPI document | `/v3/api-docs` |
 
-Required resources, when implemented: Namespace, Deployment (default 2 replicas), Service, ConfigMap, Secret, Ingress. Readiness and liveness probes must use `/actuator/health/readiness` and `/actuator/health/liveness`. PostgreSQL and Redis may run in-cluster for a portfolio demo and must be documented as demo infrastructure, not as a production-managed database service.
+Disabled in `prod`. Controllers are annotated with Springdoc operations and JWT bearer security scheme.
 
-See [docs/deployment.md](docs/deployment.md).
+## Authentication
 
-## Helm
+| Item | Behaviour |
+|---|---|
+| Register | `POST /api/v1/auth/register` → always creates `CUSTOMER` (no client-supplied role) |
+| Login | `POST /api/v1/auth/login` → JWT access token |
+| Header | `Authorization: Bearer <token>` |
+| Password | Hashed via Spring `PasswordEncoderFactories` (BCrypt id by default); never returned |
+| JWT claims | Subject (user id), email, role, `iat`, `exp` |
+| Rate limit | Fixed window per client IP on register/login; fails open if Redis is down |
 
-**Current state:** no chart.
+Public without auth: catalog GETs, register, login, Actuator health/prometheus.  
+Customer: cart and orders (own resources only).  
+Admin: catalog writes and `/api/v1/admin/orders/**`.
 
-The specified chart layout is `Chart.yaml`, `values.yaml`, `values-dev.yaml`, `values-prod.yaml`, and templates for Deployment, Service, ConfigMap, Secret, Ingress, ServiceAccount, and helpers. Values must not be hardcoded in templates when they belong in `values.yaml`. CI must run `helm lint` and `helm template`.
-
-## CI/CD
-
-**Current state:** no GitHub Actions workflows.
-
-Specified CI on push and pull request: checkout, Java setup, Maven cache, compile, unit tests, integration tests, static analysis, package, Docker build.
-
-Specified CD after successful CI on `main`: build and test, publish `ghcr.io/<owner>/ecommerce-api:<git-sha>` to GHCR, Helm validation, deploy to Kubernetes, wait for rollout, verify. Production-style deploys must prefer immutable SHA tags. A failed rollout must fail the workflow.
-
-The target cluster is not named in the specification. Credentials must come from GitHub Actions secrets when CD is implemented. A deploy step must not be reported as successful unless a real rollout occurred.
-
-## API
-
-There is no running API.
-
-The specified public surface is versioned under `/api/v1`. Public reads are limited to products, categories, registration, and login. Customer endpoints require a Bearer JWT. Administrative writes require `ADMIN`. Entities must not be returned from controllers; DTOs form the API boundary.
-
-When Springdoc is implemented, this section will record the exact OpenAPI and Swagger UI paths.
-
-## Security
-
-Specified model (not implemented):
-
-- passwords hashed with BCrypt or Argon2; never stored or returned in plaintext;
-- JWT contains subject/user id, email, role, issued-at, and expiration;
-- signing secret supplied by configuration, never hardcoded;
-- customers may access only their own cart, orders, and profile;
-- registration always creates `CUSTOMER`; the public API cannot create or promote administrators;
-- ownership is taken from the security context, not from client-supplied user ids;
-- secrets stay out of Git; Kubernetes secrets are injected as Secret resources.
+There is no public API to create or promote administrators. Provision `ADMIN` users out-of-band (direct DB / controlled tooling).
 
 Details: [docs/security.md](docs/security.md).
 
-## Engineering Decisions
+## API Examples
 
-Significant decisions are recorded as Architecture Decision Records. They capture specification choices; they do not imply that the corresponding code exists.
+Base URL examples assume `http://localhost:8080`.
+
+### Register
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "email": "customer@example.com",
+    "password": "SecurePassword123!",
+    "firstName": "Jane",
+    "lastName": "Doe"
+  }'
+```
+
+### Login
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"customer@example.com","password":"SecurePassword123!"}'
+```
+
+### Catalog
+
+```bash
+curl -sS 'http://localhost:8080/api/v1/categories'
+curl -sS 'http://localhost:8080/api/v1/products?page=0&size=20&sort=price,asc&category=electronics&minPrice=100&maxPrice=2000&search=laptop'
+curl -sS 'http://localhost:8080/api/v1/products/1'
+```
+
+Allowed product sort fields: `name`, `price`, `sku`, `createdAt`, `stockQuantity`.
+
+### Cart (authenticated)
+
+```bash
+TOKEN=<access-token>
+
+curl -sS http://localhost:8080/api/v1/cart -H "Authorization: Bearer $TOKEN"
+
+curl -sS -X POST http://localhost:8080/api/v1/cart/items \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"productId":1,"quantity":2}'
+
+curl -sS -X PATCH http://localhost:8080/api/v1/cart/items/1 \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"quantity":3}'
+```
+
+### Checkout
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/orders \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: demo-checkout-1' \
+  -d '{"shippingAddress":"1 Example Street, Berlin"}'
+```
+
+### Orders
+
+```bash
+curl -sS http://localhost:8080/api/v1/orders -H "Authorization: Bearer $TOKEN"
+curl -sS http://localhost:8080/api/v1/orders/1 -H "Authorization: Bearer $TOKEN"
+curl -sS -X POST http://localhost:8080/api/v1/orders/1/cancel -H "Authorization: Bearer $TOKEN"
+```
+
+### Admin order status
+
+```bash
+ADMIN_TOKEN=<admin-access-token>
+curl -sS -X PATCH http://localhost:8080/api/v1/admin/orders/1/status \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"status":"CONFIRMED"}'
+```
+
+Errors use a consistent JSON body (`timestamp`, `status`, `code`, `message`, `path`, correlation id when present).
+
+## Docker
+
+Production-oriented runtime image:
+
+```bash
+./mvnw package -DskipTests
+docker build -t cartforge-api:local .
+```
+
+Properties: multi-stage build, non-root UID `10001`, no secrets in the image, configurable `JAVA_OPTS`, SIGTERM / graceful shutdown, healthcheck on liveness.
+
+CI alternative that compiles inside Docker: `docker/Dockerfile.ci`.
+
+Published registry image (after CD publish):
+
+```text
+ghcr.io/<owner>/ecommerce-api:<git-sha>
+```
+
+Optional convenience tag on successful main publishes: `latest`. Prefer the SHA tag for deployments.
+
+## Kubernetes
+
+Plain manifests live under `k8s/` (Namespace, ServiceAccount, ConfigMap, Secret placeholders, Deployment, Service, Ingress, optional demo Postgres/Redis + NetworkPolicies). Prefer Helm for environment differences.
+
+Probes:
+
+- readiness: `/actuator/health/readiness` (includes DB)
+- liveness: `/actuator/health/liveness`
+
+Default API Deployment: 2 replicas, rolling update (`maxUnavailable: 0`), resource requests/limits, non-root, read-only root filesystem with `emptyDir` for `/tmp`.
+
+## Helm
+
+Chart: `helm/cartforge/`
+
+```bash
+helm lint helm/cartforge -f helm/cartforge/values-dev.yaml
+helm lint helm/cartforge -f helm/cartforge/values-prod.yaml
+
+# Local / demo (in-cluster Postgres + Redis)
+helm upgrade --install cartforge ./helm/cartforge -n cartforge --create-namespace \
+  -f helm/cartforge/values-dev.yaml
+
+# Production-style (external stores + existing Secret)
+helm upgrade --install cartforge ./helm/cartforge -n cartforge --create-namespace \
+  -f helm/cartforge/values-prod.yaml \
+  --set image.repository=ghcr.io/<owner>/ecommerce-api \
+  --set image.tag=<git-sha> \
+  --set secrets.create=false \
+  --set secrets.existingSecret=cartforge-secrets \
+  --atomic --wait --timeout 10m
+```
+
+`values-dev.yaml` enables demo in-cluster Postgres/Redis. `values-prod.yaml` expects external data stores and does not render application secrets into Git.
+
+## GitHub Actions
+
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| [CI](.github/workflows/ci.yml) | PR + push to `main` | `./mvnw verify`, Docker build (no push), Helm lint/template |
+| [Publish Image](.github/workflows/publish-image.yml) | Successful CI on `main` | Push `ghcr.io/<owner>/ecommerce-api:<sha>` (+ `latest`) |
+| [CD](.github/workflows/cd.yml) | Successful Publish on `main` | Helm deploy, rollout wait, smoke test |
+
+Permissions are least-privilege (`contents: read`; publish adds `packages: write`). Application secrets are not stored in workflow files.
+
+## GHCR
+
+Immutable tag used for deploy:
+
+```text
+ghcr.io/<owner>/ecommerce-api:<full-git-sha>
+```
+
+Authenticate publishers with the job `GITHUB_TOKEN`. Private packages need a cluster `imagePullSecret` (see [docs/deployment.md](docs/deployment.md)).
+
+## Deployment
+
+Delivery chain:
+
+```text
+CI → Publish Image → CD
+  → helm lint / template
+  → helm upgrade --install --atomic --wait
+  → kubectl rollout status
+  → scripts/ci/smoke-test.sh
+```
+
+Smoke test covers readiness (DB), health, public catalog, and auth endpoint response. Redis may be up or fail-open; the API must remain usable either way. A failed smoke test fails CD.
+
+### Required GitHub Environment `production`
+
+| Kind | Name | Notes |
+|---|---|---|
+| Secret | `KUBE_CONFIG` | Raw or base64 kubeconfig |
+| Vars | `DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS`, `INGRESS_HOST` | Recommended |
+| Vars | `KUBE_NAMESPACE`, `HELM_RELEASE_NAME`, `APP_SECRET_NAME`, `IMAGE_PULL_SECRET_NAME` | Optional |
+
+### Required Kubernetes Secret (pre-create)
+
+```bash
+kubectl create secret generic cartforge-secrets -n cartforge \
+  --from-literal=POSTGRES_PASSWORD='...' \
+  --from-literal=JWT_SECRET='...'   # ≥ 32 characters, non-placeholder
+```
+
+Full runbook: [docs/deployment.md](docs/deployment.md).
+
+## Security
+
+- Passwords hashed; never logged or returned
+- JWT secret from environment; production validator rejects placeholders and short secrets
+- Ownership from security context (no client-supplied `userId` for cart/order ownership)
+- Registration cannot assign `ADMIN`
+- Actuator: only `health` (+ probes) and `prometheus` are public; other actuator paths denied
+- CORS allowlist; wildcard rejected in `prod`
+- Secrets stay out of Git (`.env`, kubeconfig, JWT/DB passwords)
+- Containers run as non-root with dropped capabilities where configured
+
+Details: [docs/security.md](docs/security.md).
+
+## Architecture Decisions
 
 | ADR | Decision |
 |---|---|
-| [0001](docs/adr/0001-modular-monolith.md) | Modular monolith instead of microservices |
-| [0002](docs/adr/0002-postgresql-source-of-truth.md) | PostgreSQL is the source of truth |
-| [0003](docs/adr/0003-redis-as-cache.md) | Redis is a cache, not durable state |
-| [0004](docs/adr/0004-optimistic-locking.md) | Optimistic locking for concurrent stock and updates |
+| [0001](docs/adr/0001-modular-monolith.md) | Modular monolith |
+| [0002](docs/adr/0002-postgresql-source-of-truth.md) | PostgreSQL as source of truth |
+| [0003](docs/adr/0003-redis-as-cache.md) | Redis as cache (fail-open) |
+| [0004](docs/adr/0004-optimistic-locking.md) | Optimistic locking for stock |
 | [0005](docs/adr/0005-jwt-authentication.md) | JWT Bearer authentication |
-| [0006](docs/adr/0006-helm-kubernetes-deployment.md) | Helm-packaged Kubernetes deployment |
+| [0006](docs/adr/0006-helm-kubernetes-deployment.md) | Kubernetes + Helm deployment |
+| [0007](docs/adr/0007-checkout-idempotency.md) | Checkout idempotency in PostgreSQL |
+| [0008](docs/adr/0008-auth-rate-limiting.md) | Auth rate limiting (Redis, fail-open) |
+| [0009](docs/adr/0009-transactional-checkout.md) | Transactional checkout |
+| [0010](docs/adr/0010-github-actions-cicd.md) | GitHub Actions CI/CD |
 
-## Documentation
+## Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---|---|
+| App fails with password auth error to Postgres | Volume initialized with a different password → `docker compose down -v` then recreate, or align `.env` |
+| `JWT_SECRET` / placeholder rejected on startup | Use a real secret ≥ 32 characters; `prod` rejects `change-me` style values |
+| Compose build fails finding JAR | Run `./mvnw package -DskipTests` before `docker compose up --build` |
+| In-Docker Maven PKIX / TLS errors | Use host-built JAR + default `Dockerfile`, not `Dockerfile.ci` |
+| Tests fail without Docker | Testcontainers need a working Docker daemon |
+| Helm template fails with default values only | Supply `-f values-dev.yaml` or `-f values-prod.yaml` (and secrets/image as required) |
+| CD fails missing `KUBE_CONFIG` | Create GitHub Environment `production` with secret `KUBE_CONFIG` |
+| Smoke test auth returns 429 | Rate limit hit; wait for window or raise `APP_RATE_LIMIT_AUTH_*` in that environment |
+| Redis down but API still serves catalog | Expected fail-open behaviour |
+| Swagger 401/404 in `prod` | Springdoc is disabled outside `dev` |
+
+## Documentation Map
 
 | Document | Purpose |
 |---|---|
 | [SPECIFICATIONS.md](SPECIFICATIONS.md) | Authoritative requirements |
 | [docs/architecture.md](docs/architecture.md) | Runtime and package architecture |
 | [docs/database.md](docs/database.md) | Schema, constraints, migrations |
-| [docs/security.md](docs/security.md) | Authentication, authorization, secrets |
-| [docs/deployment.md](docs/deployment.md) | Docker, Kubernetes, Helm, CI/CD |
+| [docs/security.md](docs/security.md) | AuthN/Z and secrets |
+| [docs/deployment.md](docs/deployment.md) | Docker, K8s, Helm, CI/CD, secrets |
 | [docs/adr/](docs/adr/) | Architecture Decision Records |
+| [`.env.example`](.env.example) | Environment variable template |
 
-## Credentials
+## License / Credentials
 
-Do not commit real JWT secrets, database passwords, private keys, or production credentials. Seed users, when added, will be development-only and must never be applied automatically in production.
+Do not commit real JWT secrets, database passwords, private keys, kubeconfigs, or production credentials. No development seed users are shipped automatically.

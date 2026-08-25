@@ -1,71 +1,86 @@
 # Security
 
-**Status:** partially implemented. Password hashing, registration, credential verification, the database-backed user lookup, JWT issuance, and Bearer authentication on the filter chain all exist. There is no auth controller yet, so a client still has no HTTP route to obtain a token.
-
-This document records the security model required by `SPECIFICATIONS.md`. Sections marked planned are not built yet.
+This document describes the **implemented** security model. Planned-only items are called out explicitly.
 
 ## Goals
 
-- Authenticate customers and administrators with JWT Bearer tokens.
-- Authorize by role and by ownership.
-- Keep secrets out of source control and container images.
-- Avoid leaking credentials, tokens, or stack traces through APIs or logs.
+- Authenticate with JWT Bearer tokens
+- Authorize by role and ownership
+- Keep secrets out of Git and container images
+- Avoid leaking credentials, tokens, or stack traces via APIs or logs
 
 ## Authentication
-
-Specified endpoints:
 
 ```http
 POST /api/v1/auth/register
 POST /api/v1/auth/login
 ```
 
-Registration (`auth.service.RegistrationService`, implemented):
+Implemented by `AuthController` → `RegistrationService` / `AuthenticationService`.
 
-- validate email and password. The specification says "validate password" without a policy; the implemented rule is 12–72 characters. The upper bound matters because BCrypt only consumes the first 72 bytes;
-- reject duplicate email. `RegistrationService` pre-checks and also translates a `uq_users_email_lower` violation, which is the real guard between two concurrent registrations;
-- hash the password with a `DelegatingPasswordEncoder` (BCrypt default), so stored hashes carry an algorithm prefix and can be upgraded later;
-- assign role `CUSTOMER`. `RegistrationRequest` has no role field, so no other role is reachable;
-- enable the user by default;
-- return `UserResponse`, which has no password hash.
+### Registration
 
-Login (`auth.service.AuthenticationService`, implemented): `authenticate` verifies credentials and returns `AuthenticatedUser`; `login` composes that with token issuance and returns an `AccessTokenResponse`. No token is issued unless the credential check passes.
+- Validate email; password length **12–72** characters (BCrypt consumes at most 72 bytes)
+- Reject duplicate email (pre-check + `uq_users_email_lower`)
+- Hash with `DelegatingPasswordEncoder` (BCrypt id by default)
+- Always assign `CUSTOMER` — `RegistrationRequest` has no role field
+- Enable user by default
+- Return `UserResponse` (never the hash)
 
-Every failed login raises the same `InvalidCredentialsException`, whether the address is unknown, the password is wrong, or the account is disabled, so the endpoint cannot be used to enumerate users. When no user matches, the encoder is still run against a decoy hash so an unknown address costs the same work as a wrong password and cannot be identified by response timing.
+### Login
 
-`auth.service.DatabaseUserDetailsService` is the Spring Security lookup: it resolves users by email case-insensitively, maps `UserRole` to a `ROLE_` authority, and honours the `enabled` flag. Providing it also stops Spring Boot from falling back to a generated in-memory user.
+- `authenticate` verifies credentials → `login` issues JWT → `AccessTokenResponse`
+- Failed logins always raise the same `InvalidCredentialsException` (unknown email, wrong password, or disabled) to avoid user enumeration
+- Unknown email still runs the encoder against a decoy hash (timing parity)
+- `DatabaseUserDetailsService` loads by `lower(email)` so the functional unique index is usable
 
-Email lookups are written with `lower(...)` rather than Spring Data's `IgnoreCase` keyword, which generates `upper(...)` and could not use the `uq_users_email_lower` functional index that the login path depends on.
-
-Login returns an access token. Authenticated requests use:
+Authenticated requests:
 
 ```http
 Authorization: Bearer <JWT>
 ```
 
-The specification does not require refresh tokens, logout denylists, password reset, or OAuth2. Those flows will not be added unless the specification is updated.
+No refresh tokens, logout denylist, password reset, or social OAuth (not required by the specification).
 
-### Tokens (implemented)
+### JWT
 
-`auth.service.JwtTokenService` issues an HS256-signed JWT carrying `sub` (user id), `email`, `role`, `iat`, and `exp`. The lifetime is `app.jwt.expiration-ms` (`JWT_EXPIRATION`) and the signing secret is `app.jwt.secret` (`JWT_SECRET`). Neither has a hardcoded value or a committed default.
+```mermaid
+flowchart LR
+  Login[POST /login] --> Issue[JwtTokenService HS256]
+  Issue --> Token["JWT: sub, email, role, iat, exp"]
+  Token --> Header[Authorization Bearer]
+  Header --> Decoder[JwtDecoder + claim checks]
+  Decoder --> Principal[Authentication + ROLE_*]
+```
 
-Signing and verification use Spring Security's own resource-server support (Nimbus) rather than a third-party JWT library, per section 81. `common.security.JwtConfig` builds the `JwtEncoder` and `JwtDecoder` from the configured secret and rejects a secret shorter than 32 bytes at startup, because HS256 needs a 256-bit key. `ProductionEnvironmentValidator` separately rejects placeholder secrets in production.
+| Topic | Implementation |
+|---|---|
+| Algorithm | HS256 only (`JwtConfig`); `none` / asymmetric / other MAC rejected |
+| Secret | `JWT_SECRET` / `app.jwt.secret` — no committed default; ≥ 32 bytes at startup |
+| Lifetime | `JWT_EXPIRATION` / `app.jwt.expiration-ms` (default 3600000 ms outside prod-required binding) |
+| Claims | `sub` (user id), `email`, `role` (`CUSTOMER`\|`ADMIN`), `iat`, `exp` |
+| Validation | Signature + required claims; unknown/`ROLE_`-prefixed roles rejected as invalid tokens |
+| Production | `ProductionEnvironmentValidator` rejects placeholders and short secrets |
 
-Requests authenticate with `Authorization: Bearer <JWT>` through the standard resource-server filter, so signature and expiry validation is not hand-rolled. A `JwtAuthenticationConverter` maps the signed `role` claim to a `ROLE_` authority; the claim is trusted only because the signature has already been verified.
-
-The decoder additionally requires `exp`, `sub`, `email`, and `role` to be present. Spring's default validator only checks `exp` when it is there, so without this a signed token with no `exp` would never expire and one with no `sub` would receive its role without an identifiable principal. `role` must be exactly `CUSTOMER` or `ADMIN`; `admin`, `ROLE_ADMIN`, and invented roles are rejected as invalid tokens rather than authenticated-but-forbidden. `iat` is not on that list: Spring's default claim-set converter derives it from `exp` when absent, so a decoded token always has one, and the issuer sets it explicitly.
-
-The decoder is locked to HS256 with the configured HMAC secret. Tokens that declare `none`, a different MAC algorithm, or an asymmetric algorithm are rejected.
-
-Authentication and authorization failures return the standard error JSON and, for 401, `WWW-Authenticate: Bearer` with no `error_description`. Spring's default resource-server entry point would otherwise copy the decoder exception into that header.
-
-Tokens are credentials: `AccessTokenResponse.toString` is redacted so a token cannot reach a log.
+Tokens are credentials: `AccessTokenResponse.toString` is redacted.
 
 See [ADR 0005](adr/0005-jwt-authentication.md).
 
 ## Authorization
 
-The URL rules in `SecurityConfig` are implemented and tested; the handlers they protect are not written yet. Reusable rules live in `common.security`: `@RequireAdmin` (a `@PreAuthorize` meta-annotation, backed by `@EnableMethodSecurity`) and `CurrentUserProvider` for ownership.
+```mermaid
+flowchart TB
+  Req[HTTP request] --> Pub{Public matcher?}
+  Pub -->|yes| Allow[Permit]
+  Pub -->|no| Auth{Valid JWT?}
+  Auth -->|no| U401[401 UNAUTHORIZED]
+  Auth -->|yes| Role{Admin path or @RequireAdmin?}
+  Role -->|yes, not ADMIN| F403[403 FORBIDDEN]
+  Role -->|customer path| Own{CurrentUserProvider.requireSelf?}
+  Own -->|other user| F403
+  Own -->|self| Allow
+  Role -->|ADMIN| Allow
+```
 
 ### Public
 
@@ -76,54 +91,46 @@ GET  /api/v1/categories
 GET  /api/v1/categories/{id}
 POST /api/v1/auth/register
 POST /api/v1/auth/login
+GET  /actuator/health, /actuator/health/**, /actuator/prometheus
 ```
 
-The specification also requires an `active` filter on product listing while forbidding inactive items in the default public catalog. Planned rule: anonymous and customer listings are active-only; an `active` query parameter is administrator-only; public GET of an inactive product returns 404 except for `ADMIN`.
+In `dev` only: `/v3/api-docs/**`, `/swagger-ui/**`.
+
+Anonymous/customer product listings are **active-only**. The `active` query parameter on product list is administrator-only. Public GET of an inactive product returns 404 except for `ADMIN`.
 
 ### Customer
 
-Authenticated customers may access only their own cart, orders, and user profile. The specification requires own-profile access but does not list a path. Planned surface: `GET /api/v1/users/me` only. No public role-promotion API.
+Authenticated customers access their own cart and orders. Ownership comes from the JWT `sub` via `CurrentUserProvider` — never from a client-supplied `userId`.
 
-Customers must never:
+**Not implemented:** dedicated profile endpoint (`GET /api/v1/users/me`).
 
-- modify another user's cart;
-- retrieve another user's order;
-- change order status;
-- create an administrator;
-- modify product inventory.
+Customers must not: modify another cart/order, change order status, create admins, or mutate catalog/inventory.
 
 ### Administrator
 
-Administrative catalog writes and `/api/v1/admin/orders` require role `ADMIN`.
+- Catalog writes on products/categories require `ADMIN` (URL rules + `@RequireAdmin` where used)
+- `/api/v1/admin/orders/**` requires `ADMIN`
+- Customer cancel path is `POST /api/v1/orders/{id}/cancel` (not a status PATCH on the customer resource)
 
-Only the specified catalog reads are public: `GET /api/v1/products`, `GET /api/v1/products/{id}`, and the same pair for categories. Nested catalog paths such as `/products/{id}/inventory` are not public. Every other method on those paths requires `ADMIN`, declared explicitly rather than left to fall through to `anyRequest().authenticated()` — otherwise any logged-in customer could create or delete catalog entries.
-
-`PATCH`/`PUT`/`POST` of `/api/v1/orders/{id}/status` also requires `ADMIN`. The specified customer cancel path is `POST /api/v1/orders/{id}/cancel`; status changes belong on `/api/v1/admin/orders/{id}/status`. The extra rule exists so a future handler mapped onto the customer resource cannot become a privilege escalation.
-
-Administrators may be provisioned through development seed data, controlled administrative tooling, or bootstrap configuration. Registration cannot create `ADMIN` users.
+Provision `ADMIN` out-of-band (DB / controlled tooling). Registration cannot create admins. No automatic seed admin is shipped.
 
 ## Ownership boundary
 
-Requests must not treat client-supplied ownership fields as authoritative. Example: a body containing `"userId": 123` must not select the cart or order owner. Ownership is taken from the authenticated security context.
-
-`CurrentUserProvider` is the only sanctioned way to resolve the acting user. It reads the user id from the verified token's `sub` claim, and `requireSelf(ownerId)` raises `AccessDeniedException` when the resource belongs to somebody else. Administrators are not exempt from `requireSelf`: cross-user access belongs on the administrative endpoints, not on a customer's own path.
-
-Inbound payloads are structurally prevented from carrying ownership: `ApiBoundaryTest` fails the build if any DTO whose name ends in `Command` or `Request` declares a `userId`, `ownerId`, or `customerId` component.
-
-## CORS
-
-`CorsConfig` applies to `/api/**` only, with an explicit origin allowlist and credentials disabled — the API authenticates with a Bearer header, not cookies, so no origin ever needs credential support. Preflight from an unlisted origin is refused with 403, and a successful preflight does not exempt the actual request from authentication.
+- `CurrentUserProvider.requireUserId()` / `requireSelf(ownerId)` read the verified `sub`
+- Administrators are **not** exempt from `requireSelf` on customer paths — cross-user access uses admin APIs
+- `ApiBoundaryTest` fails the build if any `*Command` / `*Request` DTO declares `userId` / `ownerId` / `customerId`
 
 ## Passwords and tokens
 
-- Store only password hashes.
-- Never return hashes from any API.
-- Do not log passwords, password hashes, JWTs, authentication secrets, or complete authorization headers. `RegistrationRequest`, `LoginRequest`, and `AccessTokenResponse` override the record-generated `toString` to redact secrets. `AuthenticationService` logs `event=authentication_failed email=...` and never writes the password. Access logs record method, path, status, and duration only.
-- Disabled users (`enabled = false`) must not authenticate. `AuthenticationService` enforces this and reports it as invalid credentials rather than as a distinct state. A token issued before disablement remains valid until `exp`; there is no denylist (the specification does not require one).
+- Store hashes only; never return them
+- Do not log passwords, hashes, JWTs, secrets, or full `Authorization` headers
+- `RegistrationRequest`, `LoginRequest`, `AccessTokenResponse` redact `toString`
+- Disabled users cannot authenticate (reported as invalid credentials)
+- Tokens issued before disablement remain valid until `exp` (no denylist)
 
 ## Input validation and errors
 
-All external input is validated with Jakarta Bean Validation. Validation and business errors use the standard error JSON:
+Jakarta Bean Validation at the edge. Uniform envelope via `@RestControllerAdvice`:
 
 ```json
 {
@@ -136,72 +143,67 @@ All external input is validated with Jakarta Bean Validation. Validation and bus
 }
 ```
 
-Central handling uses `@RestControllerAdvice`. Clients must never receive SQL, stack traces, internal class names, database credentials, or JWT material. Authentication and authorization failures use the same JSON envelope (`UNAUTHORIZED` / `FORBIDDEN`); 401 responses also set `WWW-Authenticate: Bearer` without an `error_description`.
-
-Business conflicts (insufficient stock, illegal status transitions, optimistic-lock failure) use HTTP 409 where appropriate. An empty cart at checkout is mapped to 409 (`EMPTY_CART`). Unexpected failures return 500 (`INTERNAL_ERROR`) with a generic message.
+Never return SQL, stack traces, internal class names, DB credentials, or JWT material.  
+401 responses set `WWW-Authenticate: Bearer` without `error_description`.  
+Business conflicts use HTTP 409 where appropriate (stock, status, optimistic lock, empty cart, idempotency reuse).
 
 ## CORS
 
-CORS is environment-dependent. Development may allow configured local origins. Production must use an explicit allowlist. Wildcard origins must not be used in production when credentials are enabled.
+`CorsConfig` applies to `/api/**` with an explicit origin allowlist from `CORS_ORIGINS`. Credentials are disabled (Bearer header auth). Production rejects wildcard `*`. Unlisted origin preflight → 403.
 
 ## Rate limiting
-
-Authentication endpoints are protected against uncontrolled bursts:
 
 ```text
 POST /api/v1/auth/login
 POST /api/v1/auth/register
 ```
 
-Section 41 writes unversioned `/auth/login` and `/auth/register`. All business endpoints use `/api/v1`. The implemented targets are the versioned paths above.
+Redis fixed-window counter per client IP (`auth-rate:{login|register}:{ip}`). Exceed → HTTP 429 + `Retry-After`. Redis failure → **fail open** (request proceeds, warning logged). Forwarded headers ignored (no `X-Forwarded-For` spoofing). Configurable via `APP_RATE_LIMIT_AUTH_*`.
 
-Redis backs a fixed-window counter per client IP. If Redis is down, the API remains usable: fail open, log a warning, and continue. See [ADR 0008](adr/0008-auth-rate-limiting.md).
+See [ADR 0008](adr/0008-auth-rate-limiting.md).
 
 ## Secrets
 
-Do not commit `.env`, JWT secrets, database passwords, production credentials, or private keys. Provide placeholders in `.env.example` only.
+Do not commit `.env`, JWT secrets, DB passwords, kubeconfigs, or private keys. Placeholders only in `.env.example`.
 
-Kubernetes secrets are injected through Secret resources (or an equivalent secure mechanism), never through ordinary ConfigMaps.
-
-Images must not embed secrets.
+Kubernetes: inject via Secret resources (`cartforge-secrets`), never ConfigMaps. Images must not embed secrets. CD sets `secrets.create=false` and references an existing Secret.
 
 ## Actuator and HTTP hardening
 
-- Expose only Actuator endpoints that are safe and necessary: `health` and `prometheus`. `env`, `beans`, `configprops`, `heapdump`, `threaddump`, `mappings`, and `shutdown` are disabled in configuration, and any other `/actuator/**` path is `denyAll` in Spring Security so a misconfiguration that re-enables them cannot expose them. Anonymous callers receive 401; authenticated non-admin callers receive 403.
-- Production must not expose sensitive environment information. Health responses use `show-details: never` and `show-components: never`. Redis health is fail-open (`available` true/false) so a Redis outage does not mark the process DOWN.
-- Kubernetes probes use `/actuator/health/readiness` (process + PostgreSQL) and `/actuator/health/liveness` (process only). `/actuator/prometheus` is scrapeable without a JWT and must be network-restricted.
-- Use secure HTTP headers where applicable. Spring Security's defaults are enabled (`X-Content-Type-Options`, `X-Frame-Options: DENY`, `Cache-Control`).
-- Form login and HTTP Basic are disabled. Query-string tokens are ignored; only `Authorization: Bearer` authenticates.
+| Path | Access |
+|---|---|
+| `/actuator/health`, `/actuator/health/**` | Public (probes) |
+| `/actuator/prometheus` | Public (network-restrict in real deployments) |
+| Other `/actuator/**` | `denyAll` (401 anonymous / 403 authenticated) |
+
+- `show-details` / `show-components`: never
+- Readiness group: `readinessState` + `db`
+- Liveness group: `livenessState`
+- Redis availability: fail-open indicator; does not fail readiness
+- Secure headers: Spring Security defaults (`X-Content-Type-Options`, `X-Frame-Options: DENY`, cache headers)
+- Form login and HTTP Basic disabled; query-string tokens ignored
 
 ## Logging and correlation
 
-Every request gets a correlation ID: the client may send `X-Correlation-ID`, otherwise the API generates a UUID. The value is returned on the same response header, stored in SLF4J MDC as `correlationId`, and included on error JSON as `correlationId`. Unsafe inbound values (control characters, excess length) are replaced with a generated ID so they cannot poison log lines.
+- `X-Correlation-ID` accepted or generated; echoed on response; MDC + error JSON
+- Access logs: method, path, status, duration — no query strings, bodies, or headers
+- Domain logs use key=value events for auth outcomes, checkout, inventory conflicts, admin changes
 
-Access logs record `method`, `path`, `status`, and `durationMs` only. They never log query strings, bodies, or headers, so passwords, JWTs, and `Authorization` values cannot appear.
+## Security tests (implemented)
 
-Domain logs use key=value fields for authentication outcomes, registration, checkout success/failure, inventory conflicts, administrative product and order changes, and unexpected 500s. Authentication failure logs include the email attempt but never the password. Security 401/403 handlers log the path only and never the JWT decoder exception message.
+Covered by the suite, including:
 
-Log authentication failures, administrative operations, checkout failures, inventory conflicts, and unexpected exceptions.
-
-## Security tests (required when code exists)
-
-The specification requires tests that prove:
-
-- unauthenticated access is rejected where required;
-- a customer cannot read another customer's order;
-- a customer cannot call admin endpoints or modify products;
-- invalid and expired JWTs are rejected;
-- registration cannot create `ADMIN`;
-- passwords are absent from API responses.
-
-Covered so far: registration cannot create `ADMIN` (structurally, plus a reflection assertion and an ignored extra `role` JSON field); passwords are absent from responses and from every persisted column; failed logins are indistinguishable; and missing, malformed, foreign-signed, expired, unsigned, algorithm-confused, and unknown-role tokens are all rejected with 401 through the real filter chain, while a `CUSTOMER` token receives 403 on `/api/v1/admin/**` and an `ADMIN` token passes.
-
-Also covered: unauthenticated access is rejected on every non-public path; a customer receives 403 on catalog writes, nested catalog paths, `/api/v1/admin/**`, and order-status changes on both the admin and customer resources; a query-string token does not authenticate; 401 responses name the Bearer scheme and nothing else; default secure headers are present; CORS refuses unlisted and `null` origins; and ownership is proven to come from the token rather than from a request parameter, using probe handlers that exist only in the test sources.
-
-Cross-customer order access will be re-tested against the real endpoints once the order controllers exist.
+- Unauthenticated access rejected on non-public paths
+- Customer 403 on catalog writes, admin APIs, nested catalog paths
+- Cross-customer cart/order access rejected
+- Invalid / expired / foreign-signed / alg-confused JWTs → 401
+- Registration cannot create `ADMIN`; passwords absent from responses
+- CORS refuses unlisted origins; secure headers present
+- Actuator non-health paths denied
 
 ## Related documents
 
 - [architecture.md](architecture.md)
 - [deployment.md](deployment.md)
 - [ADR 0005](adr/0005-jwt-authentication.md)
+- [ADR 0008](adr/0008-auth-rate-limiting.md)

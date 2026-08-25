@@ -1,30 +1,41 @@
-# ADR 0007 — Checkout idempotency in PostgreSQL
+# ADR 0007 — Checkout idempotency strategy
 
 - **Status:** Accepted
 - **Date:** 2026-08-24
-- **Implementation:** `checkout_idempotency_keys` (Flyway `V10`), `OrderService` checkout, `Idempotency-Key` on `POST /api/v1/orders`
+- **Implementation:** complete — `checkout_idempotency_keys` (Flyway `V10`), `Idempotency-Key` on `POST /api/v1/orders`
 
 ## Context
 
-`SPECIFICATIONS.md` requires order creation to honor `Idempotency-Key` so the same authenticated user cannot create duplicate orders by retrying. The specification allows PostgreSQL or Redis. Clients may omit the header; checkout without a key stays non-idempotent.
+Clients may retry checkout after timeouts. Without idempotency, retries create duplicate orders and double stock decrements. The specification requires honoring `Idempotency-Key` for authenticated order creation and allows PostgreSQL or Redis. Omitting the header may remain non-idempotent.
 
-Checkout already mutates orders, order lines, inventory, and the cart in one PostgreSQL transaction. A successful idempotency result must be visible if and only if that transaction commits. A failed checkout must not reserve a later replay of a successful order. Concurrent retries with the same user and key must not create two orders.
+Idempotency success must be visible **if and only if** the checkout transaction commits ([ADR 0009](0009-transactional-checkout.md)).
 
 ## Decision
 
-Store idempotency records in PostgreSQL, not Redis.
+Store idempotency in **PostgreSQL**, not Redis.
 
-A row is written in the same checkout transaction as the order, with `UNIQUE (user_id, idempotency_key)` and a non-null `order_id`. Failed checkouts insert nothing, so a later retry with the same key can proceed.
+| Rule | Behavior |
+|---|---|
+| Header absent | Existing non-idempotent checkout |
+| Header present, first success | Insert row with `user_id`, key, SHA-256 body fingerprint, `order_id` in the same transaction |
+| Same user + key + fingerprint | Return original order (HTTP 200), no second stock debit |
+| Same user + key, different body | HTTP 409 `IDEMPOTENCY_KEY_REUSED` |
+| Concurrent same user + key | `pg_advisory_xact_lock` before lookup/insert; unique constraint is last guard |
+| Failed checkout | No row inserted → safe retry |
 
-Concurrent retries for the same user and key take a transaction-scoped advisory lock (`pg_advisory_xact_lock`) before lookup or insert. The unique constraint remains the last guard. Equivalent replays (same SHA-256 fingerprint of the checkout body) return the original order without decrementing stock again. A reused key with a different body is rejected with HTTP 409.
+Scope is per authenticated user (`UNIQUE (user_id, idempotency_key)`).
 
-Different users may present the same key; the unique key includes `user_id`.
+## Alternatives considered
 
-Redis remains a catalog cache. It is not the source of truth for idempotency, because a cache outage or a write outside the checkout transaction could acknowledge success without an order, or allow a second order after a rollback.
+| Alternative | Why not |
+|---|---|
+| Redis-only idempotency | Can acknowledge success without a committed order, or lose keys on flush; violates SoT under outage |
+| Always-on idempotency without header | Spec allows omitting the key; changes client contract |
+| Global (not per-user) keys | Cross-user collisions; weaker isolation |
+| Store key before business work | Failed attempts would block legitimate retries |
 
 ## Consequences
 
-- Duplicate submits survive Redis unavailability and multi-replica deploys.
-- Idempotency is scoped to authenticated checkout, not to anonymous or administrative APIs.
-- Omitting `Idempotency-Key` does not change existing checkout behavior.
-- Clients that reuse a key for a different shipping address receive `IDEMPOTENCY_KEY_REUSED` rather than a second order.
+- Duplicate submits survive Redis outages and multi-replica deploys.
+- Idempotency applies to customer checkout, not admin APIs.
+- Clients reusing a key for a different shipping address get a conflict, not a second order.

@@ -1,22 +1,30 @@
 # ADR 0001 — Modular monolith instead of microservices
 
-- **Status:** Accepted (mandated by `SPECIFICATIONS.md` v1.0.0)
+- **Status:** Accepted
 - **Date:** 2026-08-22
-- **Implementation:** not started
+- **Implementation:** complete — single Spring Boot app under `com.example.ecommerce.*`
 
 ## Context
 
-The system is a production-style e-commerce API covering authentication, catalog, cart, checkout, orders, and inventory. That surface could be split into independently deployed services. The specification forbids that split.
+CartForge covers authentication, catalog, cart, checkout, orders, and inventory. That surface could be split into independently deployed services, but the specification forbids microservice distribution and related ceremony (message buses, service mesh). The team still needs maintainable domain boundaries.
 
 ## Decision
 
-Implement one Spring Boot application. Business domains are Java packages (`auth`, `user`, `category`, `product`, `cart`, `order`, `inventory`, `common`), not separate processes.
+Ship **one** Spring Boot process. Domains are Java packages (`auth`, `user`, `category`, `product`, `cart`, `order`, `inventory`, `common`), not separate deployables.
 
-Administration is a capability (role and routes), not a microservice and not a required top-level package.
+Administration is a role and route set on owning features — not a separate package or service.
+
+## Alternatives considered
+
+| Alternative | Why not |
+|---|---|
+| Microservices per domain | Spec non-goal; distributed transactions, duplicate auth, and ops overhead without scale need |
+| Modular monolith with separate JARs / classloaders | Extra packaging complexity; package + layering rules already enforce boundaries |
+| Modular monolith + async event bus between packages | Unnecessary indirection for in-process calls |
 
 ## Consequences
 
-- One deployable artifact, one database schema owned by Flyway, one CI quality gate (`./mvnw verify`).
-- Module boundaries are package and layering rules, not network contracts.
-- Horizontal scale is replica count on a single Deployment, not per-domain services.
-- The project must not introduce Kafka-based microservice choreography or other distributed-system ceremony that the specification lists as a non-goal.
+- One artifact, one Flyway schema, one `./mvnw verify` gate.
+- Boundaries are package and layering rules, not network contracts.
+- Scale-out is Deployment replica count, not per-domain services.
+- No Kafka choreography or other distributed-system ceremony as a substitute for transactions.

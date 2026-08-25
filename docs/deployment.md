@@ -1,8 +1,8 @@
 # Deployment
 
-This document describes how CartForge is packaged and delivered. Delivery artifacts
-live in the repository: Docker image, Compose stack, Kubernetes manifests, Helm
-chart, and GitHub Actions workflows.
+How CartForge is packaged and delivered. Artifacts live in the repository: Docker image, Compose stack, raw Kubernetes manifests (`k8s/`), Helm chart (`helm/cartforge`), and GitHub Actions workflows.
+
+This document describes the **implemented** delivery path.
 
 ## Local stack
 
@@ -12,8 +12,14 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Compose services: `application`, `postgres`, `redis`. Configuration comes from
-environment variables (see `.env.example`).
+Compose services: `application`, `postgres`, `redis`. Configuration comes from environment variables (see `.env.example`).
+
+```mermaid
+flowchart LR
+  Client[HTTP client :8080] --> App[application]
+  App --> PG[(postgres)]
+  App --> Redis[(redis)]
+```
 
 ## Container image
 
@@ -39,33 +45,106 @@ ghcr.io/<owner>/ecommerce-api:latest
 
 Production deploys must use the immutable SHA tag, never `latest`.
 
-## CI / CD chain
+## Kubernetes topology
 
-```text
-CI (pull_request + push to main)
-  → ./mvnw verify
-  → Docker build (no push)
-  → Helm lint / template
+Preferred production packaging is the Helm chart. Raw manifests under `k8s/` mirror the same resource kinds for reference or non-Helm experiments.
 
-Publish Image (after successful CI on main)
-  → build from verified JAR
-  → push ghcr.io/<owner>/ecommerce-api:<sha> (+ latest)
+```mermaid
+flowchart TB
+  subgraph cluster [Kubernetes cluster]
+    Ing[Ingress nginx]
+    Svc[Service cartforge]
+    subgraph pods [Deployment replicas]
+      P1[Pod app]
+      P2[Pod app]
+    end
+    CM[ConfigMap]
+    Sec[Secret cartforge-secrets]
+  end
 
-CD (after successful Publish Image on main)
-  → Helm lint
-  → Helm template (immutable SHA tag)
-  → helm upgrade --install --atomic --wait
-  → kubectl rollout status
-  → post-deployment smoke test (`scripts/ci/smoke-test.sh`)
+  ExtPG[(External PostgreSQL)]
+  ExtRedis[(External Redis)]
+  GHCR[ghcr.io/.../ecommerce-api:sha]
+
+  Client[Clients] --> Ing --> Svc --> P1 & P2
+  P1 & P2 --> ExtPG
+  P1 & P2 --> ExtRedis
+  GHCR -.->|imagePull| P1 & P2
+  CM --> P1 & P2
+  Sec --> P1 & P2
 ```
 
-A failed rollout or smoke test fails the CD workflow. Helm `--atomic`
-rolls the release back when the upgrade does not become ready.
+Production assumes **externally managed** PostgreSQL and Redis. In-chart `demoInfrastructure.postgres` / `redis` stay **disabled** in `values-prod.yaml`.
+
+## Helm configuration
+
+Chart: `helm/cartforge` (Chart.yaml `name: cartforge`).
+
+| File | Role |
+|---|---|
+| `values.yaml` | Shared defaults; incomplete alone (CI expects env values) |
+| `values-dev.yaml` | Local/dev-oriented rendering (demo infra may be enabled) |
+| `values-prod.yaml` | Production defaults: 2 replicas, external DB/Redis, `secrets.create=false` |
+| `templates/*` | Deployment, Service, Ingress, ConfigMap, Secret, ServiceAccount, optional Postgres/Redis/NetworkPolicy |
+
+### Production values (implemented defaults)
+
+| Setting | `values-prod.yaml` |
+|---|---|
+| `replicaCount` | `2` |
+| `image.repository` | `ghcr.io/example/ecommerce-api` (override at deploy) |
+| `image.tag` | empty — CD/`--set` supplies full git SHA |
+| `ingress` | enabled, `className: nginx`, host/path placeholders |
+| `config.springProfilesActive` | `prod` |
+| `secrets.create` | `false` |
+| `secrets.existingSecret` | `cartforge-secrets` |
+| `demoInfrastructure.*` | all `enabled: false` |
+
+CD always deploys with an immutable image tag and `secrets.create=false`.
+
+### Rolling update behaviour
+
+Chart defaults:
+
+- `maxSurge: 1`, `maxUnavailable: 0`
+- readiness `/actuator/health/readiness` (includes PostgreSQL `db`)
+- liveness `/actuator/health/liveness`
+- `terminationGracePeriodSeconds: 35`
+- `preStop` delay before SIGTERM handling
+
+Unready pods do not receive Service traffic. Redis outage does not fail readiness (fail-open cache / rate limit).
+
+## CI / CD pipeline
+
+```mermaid
+flowchart LR
+  PR[PR / push main] --> CI[CI workflow]
+  CI --> JV[./mvnw verify]
+  CI --> DB[Docker build no push]
+  CI --> HL[Helm lint + template]
+
+  CI -->|success on main| Pub[Publish Image]
+  Pub --> GHCR[ghcr.io/.../ecommerce-api:sha]
+
+  Pub -->|success on main| CD[CD workflow]
+  CD --> Lint[Helm lint]
+  CD --> Tpl[Helm template SHA tag]
+  CD --> Up["helm upgrade --install --atomic --wait"]
+  CD --> Roll[kubectl rollout status]
+  CD --> Smoke[scripts/ci/smoke-test.sh]
+```
+
+| Workflow | Trigger | Outcome |
+|---|---|---|
+| `.github/workflows/ci.yml` | `pull_request`, `push` to `main` | Java verify, Docker build (no push), Helm lint/template |
+| `.github/workflows/publish-image.yml` | Successful CI on `main` (`workflow_run`), or manual SHA | Push `ecommerce-api:<sha>` (+ `latest` on main) |
+| `.github/workflows/cd.yml` | Successful Publish on `main`, or manual SHA | Helm deploy to Environment `production` + smoke |
+
+A failed rollout or smoke test fails the CD workflow. Helm `--atomic` rolls the release back when the upgrade does not become ready.
 
 ### Post-deployment smoke test
 
-`scripts/ci/smoke-test.sh` runs against the Service via `kubectl port-forward`
-and must succeed for CD to pass:
+`scripts/ci/smoke-test.sh` runs against the Service via `kubectl port-forward` and must succeed for CD to pass:
 
 | Check | How |
 |---|---|
@@ -81,12 +160,6 @@ Local usage against a running stack:
 ```bash
 ./scripts/ci/smoke-test.sh http://localhost:8080
 ```
-
-Workflow files:
-
-- `.github/workflows/ci.yml`
-- `.github/workflows/publish-image.yml`
-- `.github/workflows/cd.yml`
 
 ## Required GitHub configuration
 
@@ -175,9 +248,9 @@ kubectl create secret docker-registry ghcr-pull \
 
 ### Data stores
 
-CD assumes **externally managed** PostgreSQL and Redis (connection settings via
+CD assumes externally managed PostgreSQL and Redis (connection settings via
 GitHub variables / `values-prod.yaml`). In-cluster Postgres/Redis in the chart
-are **demo infrastructure only** and stay disabled in production values.
+are demo infrastructure only and stay disabled in production values.
 
 ### Ingress
 
@@ -207,22 +280,10 @@ helm upgrade --install cartforge ./helm/cartforge \
 kubectl rollout status deployment/cartforge -n cartforge
 ```
 
-## Rolling updates
-
-The chart defaults to:
-
-- `replicas: 2`
-- `maxSurge: 1`, `maxUnavailable: 0`
-- readiness `/actuator/health/readiness`
-- liveness `/actuator/health/liveness`
-- `terminationGracePeriodSeconds: 35`
-- `preStop` delay before SIGTERM handling
-
-Unready pods do not receive Service traffic. CD fails if rollout or readiness
-verification does not succeed.
-
 ## Related documents
 
 - [architecture.md](architecture.md)
 - [security.md](security.md)
-- [ADR 0006](adr/0006-helm-kubernetes-deployment.md)
+- [database.md](database.md)
+- [ADR 0006](adr/0006-helm-kubernetes-deployment.md) — Kubernetes + Helm
+- [ADR 0010](adr/0010-github-actions-cicd.md) — GitHub Actions CI/CD

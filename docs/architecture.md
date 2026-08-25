@@ -1,155 +1,222 @@
 # Architecture
 
-**Status:** foundation in progress. Persistence conventions are documented in [database.md](database.md). Business APIs are not implemented yet.
+CartForge is a **modular monolith**: one Spring Boot process, feature packages as module boundaries, PostgreSQL as the source of truth, and Redis as a fail-open cache and auth rate-limit store.
+
+This document describes the **implemented** system.
 
 ## Purpose
 
-CartForge is specified as a single Spring Boot application that exposes a versioned REST API for an online store. The design is a modular monolith: business domains are Java packages in one process, not independently deployed services.
-
-The architecture prioritizes maintainability, correctness, testability, and realistic backend practice over artificial distribution.
+- Expose a versioned REST API (`/api/v1`) for an online store.
+- Keep domains maintainable without microservice distribution.
+- Prefer correctness (transactions, optimistic locking, ownership checks) over artificial complexity.
 
 ## Runtime topology
 
-```text
-                         ┌─────────────────────┐
-                         │       Client        │
-                         │ Browser / Postman   │
-                         │ Swagger / API Tests │
-                         └──────────┬──────────┘
-                                    │
-                                    ▼
-                         ┌─────────────────────┐
-                         │ Ingress / HTTP      │
-                         └──────────┬──────────┘
-                                    │
-                                    ▼
-                  ┌──────────────────────────────────┐
-                  │          Spring Boot API         │
-                  │                                  │
-                  │  Authentication                  │
-                  │  Users                           │
-                  │  Products                        │
-                  │  Categories                      │
-                  │  Cart                            │
-                  │  Orders                          │
-                  │  Inventory                       │
-                  │  Administration                 │
-                  └───────────────┬──────────────────┘
-                                  │
-                    ┌─────────────┴─────────────┐
-                    │                           │
-                    ▼                           ▼
-             ┌─────────────┐             ┌─────────────┐
-             │ PostgreSQL  │             │    Redis    │
-             │ Persistent  │             │ Cache       │
-             │ Data        │             │             │
-             └─────────────┘             └─────────────┘
+```mermaid
+flowchart TB
+  Client[Client / Swagger / curl]
+  Ingress[Ingress / HTTP :8080]
+  App[Spring Boot modular monolith]
+  PG[(PostgreSQL)]
+  Redis[(Redis)]
+
+  Client --> Ingress --> App
+  App -->|durable state| PG
+  App -->|catalog cache + auth rate limit| Redis
 ```
 
-- Clients talk HTTP only.
-- Kubernetes Ingress is the production HTTP entry (when deployed).
-- One application process owns every business domain.
-- PostgreSQL is the durable store.
-- Redis is a performance optimization for catalog reads.
+- Clients speak HTTP only.
+- One JVM owns every business domain.
+- PostgreSQL stores users, catalog, carts, orders, and checkout idempotency keys.
+- Redis is optional for correctness: cache and rate limiting fail open when Redis is unavailable.
 
-## Package structure
-
-The specification requires package-by-feature organization:
+## Modular monolith and module boundaries
 
 ```text
 src/main/java/com/example/ecommerce/
-├── auth/
-├── user/
-├── category/
-├── product/
-├── cart/
-├── order/
-├── inventory/
-└── common/
+├── auth/          # register, login, JWT issuance
+├── user/          # User entity, repository, DTOs (no public profile controller)
+├── category/      # category CRUD + public list/get
+├── product/       # product CRUD + search/filter/sort/page
+├── cart/          # customer cart aggregate
+├── order/         # checkout, customer orders, /api/v1/admin/orders
+├── inventory/     # internal stock operations on Product (no HTTP API)
+└── common/        # security, errors, pagination, cache, logging, config
 ```
 
-Typical contents of a feature package: `controller`, `service`, `repository`, `entity`, `dto`, `mapper`.
-
-Inventory is the exception: it has a service and DTOs only. Stock quantity lives on `Product`. There is no inventory HTTP API.
-
-`common` holds configuration, exception handling, security filters, validation, pagination, logging, and persistence conventions (`common.persistence`). It is not a business domain.
-
-Administration appears on the runtime diagram as a capability. The prescribed package tree has no `admin` package. Administrative endpoints belong in the feature that owns the resource (catalog writes on product/category; `/api/v1/admin/orders` on order).
-
-## Layering rules
-
-- Controllers must not contain business logic and must not manage transactions.
-- Repositories must not contain business rules.
-- Entities must not be exposed through the REST API.
-- DTOs are used at API boundaries. Java records are preferred where appropriate.
-- Mapping is isolated from controllers. Manual mappers are the default. MapStruct is not introduced unless it is used consistently and provides clear value.
-- Business services define transaction boundaries.
-
-## Bounded modules
-
-| Package | Responsibility |
+| Package | Boundary |
 |---|---|
-| `auth` | Registration, login, password hashing, JWT issue and validation |
-| `user` | User persistence, roles, enabled flag, own-profile access |
-| `category` | Catalog grouping, unique name and slug, active flag |
-| `product` | SKU, money, stock quantity, optimistic locking, catalog reads |
-| `inventory` | Increase, decrease, and restore stock; reject negative stock |
-| `cart` | One cart per customer; line items; no inventory reservation |
-| `order` | Checkout, snapshots, status transitions, cancellation, admin status |
-| `common` | Cross-cutting infrastructure |
+| `auth` | HTTP auth; password hashing; JWT issue via `JwtTokenService` |
+| `user` | Persistence and role model; used by auth and ownership |
+| `category` | Catalog grouping; cache reads/writes |
+| `product` | Catalog SKUs, money, stock field, search; optimistic `@Version` |
+| `inventory` | `validateAvailability` / increase / decrease / restore on `Product` |
+| `cart` | One cart per user; line items; no stock reservation |
+| `order` | Checkout transaction, snapshots, cancel, admin status |
+| `common` | Cross-cutting only — not a business domain |
 
-## Domain relationships
+Administration is not a separate package. Admin HTTP lives on the owning feature (`product`/`category` writes, `order` → `AdminOrderController`).
 
-```text
-User 1 ─── 1 Cart
-Cart 1 ─── N CartItem
-Product 1 ─── N CartItem
+### Layering (enforced in code)
 
-User 1 ─── N Order
-Order 1 ─── N OrderItem
-Product 1 ─── N OrderItem
+- Controllers: HTTP + validation mapping; no business rules; no `@Transactional`.
+- Services: business rules and transaction boundaries.
+- Repositories: Spring Data / custom queries only.
+- Entities: never returned from controllers.
+- DTOs + manual mappers at the API boundary.
 
-Category 1 ─── N Product
+## Request flow
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant F as Filters
+  participant S as Security
+  participant Ctrl as Controller
+  participant Svc as Service
+  participant DB as PostgreSQL
+  participant R as Redis
+
+  C->>F: HTTP + optional Bearer + X-Correlation-ID
+  F->>F: CorrelationIdFilter, AuthRateLimitFilter (auth only)
+  F->>S: SecurityFilterChain
+  S->>S: JWT decode / authorize
+  S->>Ctrl: Authenticated request
+  Ctrl->>Svc: Command / query DTO
+  alt Catalog read (cached)
+    Svc->>R: Cache get
+    alt miss / Redis down
+      Svc->>DB: Query
+      Svc->>R: Cache put (best effort)
+    end
+  else Mutating / checkout
+    Svc->>DB: @Transactional unit of work
+  end
+  Svc-->>Ctrl: Response DTO
+  Ctrl-->>C: JSON (+ correlation header)
 ```
 
-Each customer has at most one cart. The planned interpretation of the 1–1 relationship and “at most one active cart” is a single cart row per user.
+Typical filter / handler order:
 
-Order items store a commercial snapshot (product name, SKU, unit price) so historical orders stay correct after later catalog changes.
+1. `CorrelationIdFilter` — accept or generate `X-Correlation-ID`
+2. `AuthRateLimitFilter` — login/register only; Redis fixed window; fail-open
+3. Spring Security — JWT resource server; method security (`@RequireAdmin`)
+4. Controller → service → repository
+5. `@RestControllerAdvice` — uniform `ApiErrorResponse`
 
-## API shape
+## Domain model (relationships)
 
-- All business endpoints use `/api/v1`.
-- Public: product and category reads, registration, login.
-- Authenticated customers: own cart, own orders, own profile.
-- Administrators: catalog writes, order listing, order status changes.
-- Ownership is derived from the authenticated principal, never from a client-supplied `userId`.
-- JSON fields use camelCase. Dates use ISO-8601. Currency is explicit.
-- Errors use a single JSON envelope via `@RestControllerAdvice`. Stack traces are never returned.
+```mermaid
+erDiagram
+  USER ||--|| CART : owns
+  CART ||--o{ CART_ITEM : contains
+  PRODUCT ||--o{ CART_ITEM : referenced
+  CATEGORY ||--o{ PRODUCT : groups
+  USER ||--o{ ORDER : places
+  ORDER ||--o{ ORDER_ITEM : contains
+  PRODUCT ||--o{ ORDER_ITEM : snapshotted
+  USER ||--o{ CHECKOUT_IDEMPOTENCY_KEY : scopes
+  ORDER ||--o| CHECKOUT_IDEMPOTENCY_KEY : result
 
-## Consistency and caching
+  USER {
+    bigint id PK
+    string email UK
+    string role
+    boolean enabled
+    bigint version
+  }
+  PRODUCT {
+    bigint id PK
+    string sku UK
+    numeric price
+    int stock_quantity
+    boolean active
+    bigint version
+  }
+  ORDER {
+    bigint id PK
+    string order_number UK
+    string status
+    numeric total_amount
+    bigint version
+  }
+```
 
-Checkout, cancellation, inventory changes, and necessary administrative status updates run in explicit database transactions.
+## Consistency
 
-Checkout must: load the cart, reject an empty cart, verify active products and stock, calculate current prices, create the order and items, decrement inventory, clear the cart, and commit atomically. Optimistic locking on products prevents negative stock under concurrent checkouts. Optional `Idempotency-Key` replays a committed order for the same user and equivalent body; the key is stored in PostgreSQL in that same transaction.
+### Transaction boundaries
 
-Redis cache keys must be deterministic (`product:{id}`, `category:{id}`, `products:{query-hash}`). Writes invalidate affected keys. If Redis is unavailable, the application logs a warning and reads PostgreSQL. Authentication endpoints use a Redis fixed-window rate limit that fails open if Redis is down; see [ADR 0008](adr/0008-auth-rate-limiting.md).
+Services own `@Transactional`. Controllers never open transactions.
 
-## Cross-cutting concerns
+| Operation | Service | Notes |
+|---|---|---|
+| Checkout | `OrderService` | Cart lock → validate → order + lines → decrease stock → clear cart → optional idempotency row ([ADR 0009](adr/0009-transactional-checkout.md)) |
+| Cancel | `OrderService` | Status transition + inventory restore |
+| Admin status | `AdminOrderService` | Validated `OrderStatus` transitions |
+| Inventory | `InventoryService` | Increase / decrease / restore |
+| Cart mutations | `CartService` | Persist cart aggregate |
+| Catalog writes | `ProductService` / `CategoryService` | Evict Redis keys after commit path |
 
-- JWT Bearer authentication and role checks.
-- Jakarta Bean Validation at the API edge.
-- Allowlisted sort fields and enforced maximum page size.
-- Request correlation ID (`X-Correlation-ID` or generated), returned on the response and on error JSON.
-- Actuator health, liveness, readiness (PostgreSQL), fail-open Redis status, and Prometheus metrics (`/actuator/prometheus`).
-- Structured logging without passwords, hashes, JWTs, or authorization headers.
+### Optimistic locking
+
+`Product`, `User`, and `Order` extend `VersionedEntity` (`@Version`). Concurrent stock updates raise `OptimisticLockingFailureException`, mapped to HTTP 409. PostgreSQL `ck_products_stock_quantity_non_negative` is the last guard.
+
+See [ADR 0004](adr/0004-optimistic-locking.md).
+
+### Checkout idempotency
+
+Optional header `Idempotency-Key` on `POST /api/v1/orders`:
+
+- Stored in `checkout_idempotency_keys` in the **same** checkout transaction ([ADR 0007](adr/0007-checkout-idempotency.md)).
+- Unique on `(user_id, idempotency_key)`.
+- Concurrent retries take `pg_advisory_xact_lock`.
+- Equivalent body fingerprint → replay original order; different body → HTTP 409.
+- Omitting the header keeps non-idempotent checkout.
+
+### Redis caching
+
+Catalog caches ([`CatalogCaches`](../src/main/java/com/example/ecommerce/common/cache/CatalogCaches.java)):
+
+| Cache name | Key shape | Example |
+|---|---|---|
+| `product` | `{id}` | `product:42` |
+| `category` | `{id}` | `category:7` |
+| `products` | query hash from `ProductSearchCriteria.cacheKey()` | `products:{hash}` |
+| `categories` | `active` | `categories:active` |
+
+Writes `@CacheEvict` affected entries (and list caches). Redis outage → log warning, read PostgreSQL ([ADR 0003](adr/0003-redis-as-cache.md)). Auth rate limiting also fails open ([ADR 0008](adr/0008-auth-rate-limiting.md)).
+
+Spring’s Redis health indicator is disabled for readiness; `FailOpenRedisHealthIndicator` (`redisAvailability`) reports availability without marking the process DOWN.
+
+## API surface (implemented)
+
+| Area | Paths |
+|---|---|
+| Auth | `POST /api/v1/auth/register`, `POST /api/v1/auth/login` |
+| Categories | `GET` public; `POST/PUT/PATCH/DELETE` admin |
+| Products | `GET` list/get public; writes admin; search query params |
+| Cart | `/api/v1/cart` (+ items) — authenticated customer |
+| Orders | `POST/GET/cancel` customer; `/api/v1/admin/orders` admin |
+| Actuator | `/actuator/health/**`, `/actuator/prometheus` public; other actuator denied |
+
+**Not implemented:** dedicated user-profile HTTP API (`/users/me`), automatic seed users.
+
+## Cross-cutting
+
+- JWT Bearer; ownership from `CurrentUserProvider` (`sub` claim)
+- Jakarta Validation at the edge
+- Allowlisted sort fields; max page size
+- Correlation ID on responses and error JSON
+- Actuator readiness includes `db`; liveness is process-only
+- Logging redacts passwords and tokens
 
 ## Non-goals
 
-The application must not become a microservice mesh, a payment processor, or a search-engine deployment. See `SPECIFICATIONS.md` section 4.
+No microservice mesh, payment processor, or external search cluster. See `SPECIFICATIONS.md` §4.
 
 ## Related documents
 
 - [database.md](database.md)
 - [security.md](security.md)
 - [deployment.md](deployment.md)
-- [adr/](adr/)
+- [adr/](adr/) — ADRs 0001–0010 (monolith, PostgreSQL, Redis, locking, JWT, Helm, idempotency, rate limit, checkout txn, CI/CD)
