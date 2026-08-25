@@ -1,0 +1,49 @@
+{{- if and .Values.demoInfrastructure.networkPolicy.enabled .Values.demoInfrastructure.postgres.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cartforge.postgresName" . }}
+  labels:
+    {{- include "cartforge.commonLabels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "cartforge.postgresName" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "cartforge.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.database.port }}
+{{- end }}
+{{- if and .Values.demoInfrastructure.networkPolicy.enabled .Values.demoInfrastructure.redis.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cartforge.redisName" . }}
+  labels:
+    {{- include "cartforge.commonLabels" . | nindent 4 }}
+    app.kubernetes.io/component: cache
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "cartforge.redisName" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "cartforge.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.redis.port }}
+{{- end }}

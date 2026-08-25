@@ -1,0 +1,17 @@
+CartForge has been deployed to {{ .Release.Namespace }} as {{ .Release.Name }}.
+
+1. Verify rollout:
+   kubectl rollout status deployment/{{ include "cartforge.fullname" . }} -n {{ .Release.Namespace }}
+
+2. Reach the API (when Ingress is enabled):
+   http{{ if .Values.ingress.tls }}s{{ end }}://{{ (index .Values.ingress.hosts 0).host }}/api/v1/products
+
+{{- if .Values.demoInfrastructure.postgres.enabled }}
+
+Note: in-cluster PostgreSQL and Redis are demo infrastructure only.
+{{- end }}
+
+{{- if not .Values.secrets.create }}
+
+Secrets are expected from: {{ .Values.secrets.existingSecret }}
+{{- end }}

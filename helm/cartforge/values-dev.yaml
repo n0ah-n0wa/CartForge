@@ -1,0 +1,40 @@
+# Local / demo cluster. Demo in-cluster stores are not production-managed services.
+
+replicaCount: 2
+
+image:
+  repository: cartforge-api
+  tag: local
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: cartforge.local
+      paths:
+        - path: /api
+          pathType: Prefix
+
+config:
+  springProfilesActive: prod
+  loggingLevelRoot: DEBUG
+  corsOrigins: http://cartforge.local
+
+waitForDependencies:
+  enabled: true
+
+secrets:
+  create: true
+  existingSecret: ""
+  # Demo placeholders only. Override locally; do not use in a real environment.
+  postgresPassword: local-k8s-demo-postgres-password
+  jwtSecret: local-k8s-demo-jwt-secret-32chars-min!!
+
+demoInfrastructure:
+  postgres:
+    enabled: true
+  redis:
+    enabled: true
+  networkPolicy:
+    enabled: true

@@ -1,0 +1,166 @@
+# Default chart values. Environment-specific overrides live in
+# values-dev.yaml and values-prod.yaml. Do not put real secrets here.
+#
+# Install with an environment values file:
+#   helm upgrade --install cartforge ./helm/cartforge -f helm/cartforge/values-dev.yaml
+#   helm upgrade --install cartforge ./helm/cartforge -f helm/cartforge/values-prod.yaml ...
+
+replicaCount: 2
+
+image:
+  repository: cartforge-api
+  tag: local
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: false
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  runAsNonRoot: true
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: cartforge.local
+      paths:
+        - path: /api
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+terminationGracePeriodSeconds: 35
+minReadySeconds: 10
+revisionHistoryLimit: 3
+progressDeadlineSeconds: 600
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+waitForDependencies:
+  enabled: false
+  image: busybox:1.37.0-musl
+  pullPolicy: IfNotPresent
+
+probes:
+  startup:
+    path: /actuator/health/readiness
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
+  readiness:
+    path: /actuator/health/readiness
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  liveness:
+    path: /actuator/health/liveness
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+config:
+  springProfilesActive: prod
+  loggingLevelRoot: INFO
+  jwtExpiration: "3600000"
+  corsOrigins: http://cartforge.local
+  pagination:
+    defaultPageSize: "20"
+    maxPageSize: "100"
+  rateLimit:
+    authEnabled: "true"
+    authLimit: "20"
+    authWindowSeconds: "60"
+  javaOpts: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8"
+
+# Extra non-secret environment variables merged into the ConfigMap.
+extraEnv: {}
+
+database:
+  # When empty, built from host/port/name (requires demoInfrastructure.postgres.enabled or explicit host/url).
+  url: ""
+  host: ""
+  port: 5432
+  name: ecommerce
+  username: ecommerce
+
+redis:
+  # When empty, built from host/port (requires demoInfrastructure.redis.enabled or explicit host/url).
+  url: ""
+  host: ""
+  port: 6379
+
+# Secret handling: create a chart-managed Secret, or reference an existing one.
+# Real values must be supplied at deploy time (--set, --set-file, or values-secrets.yaml).
+secrets:
+  create: false
+  existingSecret: ""
+  postgresPassword: ""
+  jwtSecret: ""
+  postgresPasswordKey: POSTGRES_PASSWORD
+  jwtSecretKey: JWT_SECRET
+
+# In-cluster PostgreSQL and Redis are demo infrastructure, not a managed production service.
+demoInfrastructure:
+  postgres:
+    enabled: false
+    image: postgres:16-alpine
+    persistence:
+      size: 1Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  redis:
+    enabled: false
+    image: redis:7.4-alpine
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+  networkPolicy:
+    enabled: false

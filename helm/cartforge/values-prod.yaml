@@ -1,0 +1,63 @@
+# Production-oriented defaults. Supply image tag, hostnames, and secrets at deploy time.
+# Example:
+#   helm upgrade --install cartforge ./helm/cartforge \
+#     -f helm/cartforge/values-prod.yaml \
+#     -f values-secrets.yaml \
+#     --set image.tag=$GIT_SHA \
+#     --set image.repository=ghcr.io/<owner>/ecommerce-api
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/example/ecommerce-api
+  tag: ""
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: api.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+config:
+  springProfilesActive: prod
+  loggingLevelRoot: WARN
+  corsOrigins: https://shop.example.com
+
+waitForDependencies:
+  enabled: false
+
+database:
+  url: jdbc:postgresql://postgres.example.com:5432/ecommerce
+  host: postgres.example.com
+  username: ecommerce
+
+redis:
+  url: redis://redis.example.com:6379
+  host: redis.example.com
+
+# Do not commit production credentials. Create the Secret out-of-band or pass
+# values-secrets.yaml (gitignored) / --set-string at deploy time.
+secrets:
+  create: false
+  existingSecret: cartforge-secrets
+
+demoInfrastructure:
+  postgres:
+    enabled: false
+  redis:
+    enabled: false
+  networkPolicy:
+    enabled: false

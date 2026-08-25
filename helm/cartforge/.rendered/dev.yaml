@@ -1,0 +1,591 @@
+---
+# Source: cartforge/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cartforge-postgres
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: database
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cartforge-postgres
+      app.kubernetes.io/instance: cartforge
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cartforge
+              app.kubernetes.io/instance: cartforge
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# Source: cartforge/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cartforge-redis
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: cache
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cartforge-redis
+      app.kubernetes.io/instance: cartforge
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cartforge
+              app.kubernetes.io/instance: cartforge
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 6379
+
+---
+# Source: cartforge/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cartforge
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: api
+automountServiceAccountToken: false
+
+---
+# Source: cartforge/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cartforge-secrets
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: api
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: "local-k8s-demo-postgres-password"
+  JWT_SECRET: "local-k8s-demo-jwt-secret-32chars-min!!"
+
+---
+# Source: cartforge/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cartforge
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: api
+data:
+  SPRING_PROFILES_ACTIVE: "prod"
+  SERVER_PORT: "8080"
+  LOGGING_LEVEL_ROOT: "DEBUG"
+  DATABASE_URL: "jdbc:postgresql://cartforge-postgres:5432/ecommerce"
+  DATABASE_USERNAME: "ecommerce"
+  REDIS_URL: "redis://cartforge-redis:6379"
+  JWT_EXPIRATION: "3600000"
+  CORS_ORIGINS: "http://cartforge.local"
+  APP_PAGINATION_DEFAULT_PAGE_SIZE: "20"
+  APP_PAGINATION_MAX_PAGE_SIZE: "100"
+  APP_RATE_LIMIT_AUTH_ENABLED: "true"
+  APP_RATE_LIMIT_AUTH_LIMIT: "20"
+  APP_RATE_LIMIT_AUTH_WINDOW_SECONDS: "60"
+  JAVA_OPTS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8"
+
+---
+# Source: cartforge/templates/postgres.yaml
+# Demo in-cluster PostgreSQL - not a production-managed database service.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cartforge-postgres-data
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: database
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# Source: cartforge/templates/postgres.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: cartforge-postgres
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cartforge-postgres
+    app.kubernetes.io/instance: cartforge
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+
+---
+# Source: cartforge/templates/redis.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: cartforge-redis
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: cache
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cartforge-redis
+    app.kubernetes.io/instance: cartforge
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+
+---
+# Source: cartforge/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: cartforge
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+
+---
+# Source: cartforge/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cartforge
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  progressDeadlineSeconds: 600
+  minReadySeconds: 10
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cartforge
+      app.kubernetes.io/instance: cartforge
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cartforge
+        app.kubernetes.io/instance: cartforge
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: cartforge
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 35
+      securityContext:
+        fsGroup: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.37.0-musl
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - until nc -z cartforge-postgres 5432; do echo waiting for postgres; sleep 2; done
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+        - name: wait-for-redis
+          image: busybox:1.37.0-musl
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - until nc -z cartforge-redis 6379; do echo waiting for redis; sleep 2; done
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      containers:
+        - name: api
+          image: cartforge-api:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: cartforge
+          env:
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cartforge-secrets
+                  key: POSTGRES_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cartforge-secrets
+                  key: JWT_SECRET
+            - name: TMPDIR
+              value: /tmp/app
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - sleep 5
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp/app
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+---
+# Source: cartforge/templates/postgres.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cartforge-postgres
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: database
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cartforge-postgres
+      app.kubernetes.io/instance: cartforge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cartforge-postgres
+        app.kubernetes.io/instance: cartforge
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: cartforge
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "ecommerce"
+            - name: POSTGRES_USER
+              value: "ecommerce"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cartforge-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - ecommerce
+                - -d
+                - ecommerce
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - ecommerce
+                - -d
+                - ecommerce
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: cartforge-postgres-data
+
+---
+# Source: cartforge/templates/redis.yaml
+# Demo in-cluster Redis - not a production-managed cache service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cartforge-redis
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: cache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cartforge-redis
+      app.kubernetes.io/instance: cartforge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cartforge-redis
+        app.kubernetes.io/instance: cartforge
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: cartforge
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            - redis-server
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            limits:
+              cpu: 250m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          emptyDir: {}
+
+---
+# Source: cartforge/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cartforge
+  labels:
+    helm.sh/chart: cartforge-0.1.0
+    app.kubernetes.io/name: cartforge
+    app.kubernetes.io/instance: cartforge
+    app.kubernetes.io/version: "0.1.0-SNAPSHOT"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: cartforge
+    app.kubernetes.io/component: api
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: "cartforge.local"
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: cartforge
+                port:
+                  name: http
