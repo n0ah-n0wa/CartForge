@@ -1,0 +1,38 @@
+# Build outputs — the packaged JAR is copied in during `docker build` after
+# `./mvnw package -DskipTests` on the host or in CI.
+target/*
+!target/ecommerce-api-*.jar
+
+# Secrets and local env — never copy into the build context.
+.env
+.env.*
+!.env.example
+
+# Version control and IDE metadata.
+.git/
+.gitignore
+.github/
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Documentation and specs (not needed to run the app).
+*.md
+docs/
+SPECIFICATIONS.md
+
+# Kubernetes / Helm (not part of the application image).
+helm/
+k8s/
+kubernetes/
+
+# Test and quality tooling (tests run in CI, not in the runtime image).
+src/test/
+config/checkstyle/
+config/spotbugs/
+
+# OS noise.
+.DS_Store
+Thumbs.db

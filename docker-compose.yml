@@ -1,0 +1,92 @@
+# Local development stack for CartForge.
+#
+# Prerequisites:
+#   cp .env.example .env   # set POSTGRES_PASSWORD and JWT_SECRET (32+ chars)
+#   docker compose up --build
+#
+# Compose loads `.env` for variable substitution and passes it to containers via
+# env_file. Never commit `.env`.
+
+name: cartforge
+
+networks:
+  cartforge:
+    driver: bridge
+
+volumes:
+  postgres_data:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    networks:
+      - cartforge
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    networks:
+      - cartforge
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  application:
+    build:
+      context: .
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    image: cartforge-api:local
+    networks:
+      - cartforge
+    ports:
+      - "${SERVER_PORT}:8080"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE}
+      SERVER_PORT: 8080
+      LOGGING_LEVEL_ROOT: ${LOGGING_LEVEL_ROOT}
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      DATABASE_USERNAME: ${POSTGRES_USER}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      APP_PAGINATION_DEFAULT_PAGE_SIZE: ${APP_PAGINATION_DEFAULT_PAGE_SIZE}
+      APP_PAGINATION_MAX_PAGE_SIZE: ${APP_PAGINATION_MAX_PAGE_SIZE}
+      APP_RATE_LIMIT_AUTH_ENABLED: ${APP_RATE_LIMIT_AUTH_ENABLED}
+      APP_RATE_LIMIT_AUTH_LIMIT: ${APP_RATE_LIMIT_AUTH_LIMIT}
+      APP_RATE_LIMIT_AUTH_WINDOW_SECONDS: ${APP_RATE_LIMIT_AUTH_WINDOW_SECONDS}
+      JAVA_OPTS: ${JAVA_OPTS:-}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+    stop_grace_period: 35s
+    restart: unless-stopped

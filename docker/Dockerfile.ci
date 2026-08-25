@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1
+
+# CI / unrestricted-network build: compile inside Docker, then package into the
+# same runtime image as the default Dockerfile. Use:
+#   docker build -f docker/Dockerfile.ci -t cartforge-api:ci .
+FROM maven:3.9.9-eclipse-temurin-21 AS builder
+
+WORKDIR /workspace
+
+COPY pom.xml ./
+RUN mvn dependency:go-offline -B
+
+COPY src/ src/
+RUN mvn package -DskipTests -B -q \
+    && test -s target/ecommerce-api-*.jar
+
+FROM eclipse-temurin:21-jre-jammy AS runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid app --home-dir /app --shell /usr/sbin/nologin app \
+    && mkdir -p /app /tmp/app \
+    && chown -R app:app /app /tmp/app
+
+WORKDIR /app
+
+COPY --from=builder --chown=app:app /workspace/target/ecommerce-api-*.jar /app/app.jar
+COPY --chown=app:app docker/entrypoint.sh /app/entrypoint.sh
+
+RUN chmod 0555 /app/entrypoint.sh /app/app.jar
+
+USER app:app
+
+ENV SERVER_PORT=8080 \
+    JAVA_OPTS="" \
+    TMPDIR=/tmp/app
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:${SERVER_PORT}/actuator/health/liveness" >/dev/null || exit 1
+
+STOPSIGNAL SIGTERM
+
+ENTRYPOINT ["/app/entrypoint.sh"]
