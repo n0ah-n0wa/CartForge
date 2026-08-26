@@ -14,6 +14,8 @@ import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.product.mapper.ProductMapper;
 import com.example.ecommerce.product.repository.ProductRepository;
 import com.example.ecommerce.product.repository.ProductSpecifications;
+import java.math.BigDecimal;
+import java.util.List;
 import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +50,45 @@ public class ProductService {
         this.categoryRepository = categoryRepository;
         this.productMapper = productMapper;
         this.properties = properties;
+    }
+
+    /**
+     * Resolves the active filter for catalog search. Non-administrators always
+     * receive active products; administrators may filter by status or list both.
+     */
+    public static Boolean resolveActiveFilter(Boolean activeFilter, boolean isAdmin) {
+        if (isAdmin) {
+            return activeFilter;
+        }
+        if (activeFilter != null) {
+            throw new InvalidProductQueryException("active filter requires administrator privileges");
+        }
+        return Boolean.TRUE;
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<ProductResponse> searchResponsesForCaller(
+            String category,
+            BigDecimal minPrice,
+            BigDecimal maxPrice,
+            String search,
+            Integer page,
+            Integer size,
+            List<String> sort,
+            Boolean activeFilter,
+            boolean isAdmin) {
+        ProductSearchCriteria criteria = ProductSearchCriteria.of(
+                category,
+                minPrice,
+                maxPrice,
+                search,
+                page,
+                size,
+                sort,
+                resolveActiveFilter(activeFilter, isAdmin),
+                properties.pagination().defaultPageSize(),
+                properties.pagination().maxPageSize());
+        return searchResponses(criteria);
     }
 
     /**

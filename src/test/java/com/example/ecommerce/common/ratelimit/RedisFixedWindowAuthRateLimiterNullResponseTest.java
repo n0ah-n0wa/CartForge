@@ -32,7 +32,7 @@ class RedisFixedWindowAuthRateLimiterNullResponseTest {
                 new ApplicationProperties.Jwt("test-only-jwt-secret-not-for-production-use", 3_600_000L),
                 new ApplicationProperties.Cors(List.of("http://localhost")),
                 new ApplicationProperties.Pagination(20, 100),
-                new ApplicationProperties.RateLimit(new ApplicationProperties.RateLimit.Auth(true, 3, 60)));
+                new ApplicationProperties.RateLimit(new ApplicationProperties.RateLimit.Auth(true, 3, 60, List.of())));
         limiter = new RedisFixedWindowAuthRateLimiter(redisTemplate, properties);
     }
 

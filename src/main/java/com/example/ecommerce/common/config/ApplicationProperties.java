@@ -51,14 +51,27 @@ public record ApplicationProperties(
     public record RateLimit(@NotNull @Valid Auth auth) {
 
         public static RateLimit defaults() {
-            return new RateLimit(new Auth(true, 20, 60));
+            return new RateLimit(Auth.defaults());
         }
 
         public record Auth(
                 boolean enabled,
                 @Min(1) int limit,
-                @Min(1) int windowSeconds
+                @Min(1) int windowSeconds,
+                List<String> trustedProxies
         ) {
+            public Auth {
+                trustedProxies = trustedProxies == null ? List.of() : List.copyOf(trustedProxies);
+            }
+
+            public static Auth defaults() {
+                return new Auth(true, 20, 60, List.of());
+            }
+
+            @Override
+            public List<String> trustedProxies() {
+                return List.copyOf(trustedProxies);
+            }
         }
     }
 

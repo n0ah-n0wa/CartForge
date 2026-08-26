@@ -1,17 +1,11 @@
 package com.example.ecommerce.cart.service;
 
-public class CartItemNotFoundException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
-
-    private final Long productId;
+public class CartItemNotFoundException extends DomainApiException {
 
     public CartItemNotFoundException(Long productId) {
-        super("Cart does not contain product: " + productId);
-        this.productId = productId;
-    }
-
-    public Long getProductId() {
-        return productId;
+        super("CART_ITEM_NOT_FOUND", HttpStatus.NOT_FOUND, "Cart item not found for product " + productId);
     }
 }

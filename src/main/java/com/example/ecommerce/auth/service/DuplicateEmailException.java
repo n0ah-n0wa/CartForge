@@ -1,15 +1,11 @@
 package com.example.ecommerce.auth.service;
 
-/**
- * Raised when registration is attempted for an address that already exists.
- * Maps to HTTP 409 once controllers exist. The message never carries the
- * submitted password.
- */
-public class DuplicateEmailException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+public class DuplicateEmailException extends DomainApiException {
 
     public DuplicateEmailException(String email) {
-        super("Email already registered: " + email);
+        super("DUPLICATE_EMAIL", HttpStatus.CONFLICT, "Email already registered: " + email);
     }
 }

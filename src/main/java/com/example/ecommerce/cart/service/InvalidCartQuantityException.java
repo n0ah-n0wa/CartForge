@@ -1,10 +1,11 @@
 package com.example.ecommerce.cart.service;
 
-public class InvalidCartQuantityException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+public class InvalidCartQuantityException extends DomainApiException {
 
     public InvalidCartQuantityException(String message) {
-        super(message);
+        super("INVALID_CART_QUANTITY", HttpStatus.BAD_REQUEST, message);
     }
 }

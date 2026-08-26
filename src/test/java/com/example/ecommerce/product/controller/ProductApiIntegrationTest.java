@@ -10,15 +10,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.example.ecommerce.auth.dto.AuthenticatedUser;
 import com.example.ecommerce.auth.service.JwtTokenService;
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.category.repository.CategoryRepository;
 import com.example.ecommerce.common.persistence.CurrencyCode;
 import com.example.ecommerce.common.support.IntegrationTestContainers;
+import com.example.ecommerce.common.support.PersistedAuthUsers;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.product.repository.ProductRepository;
-import com.example.ecommerce.user.UserRole;
+import com.example.ecommerce.user.repository.UserRepository;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +26,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -70,6 +71,14 @@ class ProductApiIntegrationTest {
     @Autowired
     private ProductRepository productRepository;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    private PersistedAuthUsers authUsers;
+
     private Category books;
 
     @BeforeEach
@@ -77,6 +86,7 @@ class ProductApiIntegrationTest {
         productRepository.deleteAll();
         categoryRepository.deleteAll();
         books = categoryRepository.saveAndFlush(Category.create("Books", "books", null));
+        authUsers = new PersistedAuthUsers(userRepository, passwordEncoder, jwtTokenService);
     }
 
     @Test
@@ -576,14 +586,10 @@ class ProductApiIntegrationTest {
     }
 
     private String customer() {
-        return "Bearer " + jwtTokenService
-                .issue(new AuthenticatedUser(1L, "ada@example.com", UserRole.CUSTOMER))
-                .accessToken();
+        return authUsers.customerBearer();
     }
 
     private String admin() {
-        return "Bearer " + jwtTokenService
-                .issue(new AuthenticatedUser(2L, "root@example.com", UserRole.ADMIN))
-                .accessToken();
+        return authUsers.adminBearer();
     }
 }

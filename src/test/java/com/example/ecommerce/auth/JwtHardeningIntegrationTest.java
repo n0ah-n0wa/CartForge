@@ -6,18 +6,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.example.ecommerce.auth.service.JwtTokenService;
 import com.example.ecommerce.common.security.JwtClaims;
+import com.example.ecommerce.common.support.PersistedAuthUsers;
+import com.example.ecommerce.user.repository.UserRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.time.Instant;
 import java.util.Base64;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
@@ -72,6 +77,22 @@ class JwtHardeningIntegrationTest {
     @Autowired
     private JwtEncoder jwtEncoder;
 
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    private PersistedAuthUsers authUsers;
+
+    @BeforeEach
+    void setUpAuthUsers() {
+        authUsers = new PersistedAuthUsers(userRepository, passwordEncoder, jwtTokenService);
+    }
+
     @Test
     void rejectsATokenThatNeverExpires() throws Exception {
         String everlasting = sign(JwtClaimsSet.builder()
@@ -116,7 +137,9 @@ class JwtHardeningIntegrationTest {
     @Test
     void acceptsAHandSignedTokenThatCarriesEveryRequiredClaim() throws Exception {
         Instant now = Instant.now();
-        String complete = handSign("{\"sub\":\"1\",\"email\":\"ada@example.com\",\"role\":\"CUSTOMER\",\"iat\":"
+        String subject = String.valueOf(authUsers.ensureCustomer().getId());
+        String complete = handSign("{\"sub\":\"" + subject
+                + "\",\"email\":\"ada@example.com\",\"role\":\"CUSTOMER\",\"iat\":"
                 + now.getEpochSecond() + ",\"exp\":" + now.plusSeconds(600).getEpochSecond() + "}");
 
         mockMvc.perform(get(PROTECTED_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + complete))
@@ -151,8 +174,9 @@ class JwtHardeningIntegrationTest {
 
     @Test
     void stillAcceptsATokenCarryingEveryRequiredClaim() throws Exception {
+        String subject = String.valueOf(authUsers.ensureCustomer().getId());
         String complete = sign(JwtClaimsSet.builder()
-                .subject("1")
+                .subject(subject)
                 .claim(JwtClaims.EMAIL, "ada@example.com")
                 .claim(JwtClaims.ROLE, "CUSTOMER")
                 .issuedAt(Instant.now())

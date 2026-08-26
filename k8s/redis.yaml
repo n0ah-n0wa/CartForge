@@ -1,4 +1,5 @@
 # Demo in-cluster Redis — not a production-managed cache service.
+# REDIS_PASSWORD must come from cartforge-secrets (see secret.example.yaml).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,10 +35,18 @@ spec:
           imagePullPolicy: IfNotPresent
           args:
             - redis-server
+            - --requirepass
+            - $(REDIS_PASSWORD)
             - --save
             - ""
             - --appendonly
             - "no"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cartforge-secrets
+                  key: REDIS_PASSWORD
           ports:
             - name: redis
               containerPort: 6379
@@ -45,6 +54,8 @@ spec:
             exec:
               command:
                 - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
                 - ping
             initialDelaySeconds: 5
             periodSeconds: 5
@@ -53,6 +64,8 @@ spec:
             exec:
               command:
                 - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
                 - ping
             initialDelaySeconds: 15
             periodSeconds: 10

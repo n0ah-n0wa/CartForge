@@ -1,17 +1,14 @@
 package com.example.ecommerce.order.service;
 
-/**
- * Raised when checkout references a product that is no longer active.
- * Maps to HTTP 400 ({@code INACTIVE_PRODUCT}).
- */
-public class InactiveProductForCheckoutException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+public class InactiveProductForCheckoutException extends DomainApiException {
 
     private final Long productId;
 
     public InactiveProductForCheckoutException(Long productId) {
-        super("Inactive product cannot be purchased: " + productId);
+        super("INACTIVE_PRODUCT", HttpStatus.BAD_REQUEST, "Product " + productId + " is not active");
         this.productId = productId;
     }
 

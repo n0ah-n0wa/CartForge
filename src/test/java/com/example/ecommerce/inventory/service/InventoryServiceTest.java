@@ -194,6 +194,15 @@ class InventoryServiceTest {
         verify(productRepository, never()).saveAndFlush(any());
     }
 
+    @Test
+    void lockForCheckoutReturnsTheRowLockedForUpdate() {
+        Product product = readyProductForMutation(4);
+
+        assertThat(inventoryService.lockForCheckout(PRODUCT_ID)).isSameAs(product);
+        verify(productRepository).findByIdForUpdate(PRODUCT_ID);
+        verify(productRepository, never()).saveAndFlush(any());
+    }
+
     private Product readyProductForMutation(int stock) {
         Product product = productWithStock(stock);
         when(productRepository.findByIdForUpdate(PRODUCT_ID)).thenReturn(Optional.of(product));

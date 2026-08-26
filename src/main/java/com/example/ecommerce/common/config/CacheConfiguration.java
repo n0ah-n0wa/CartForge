@@ -4,7 +4,8 @@ import com.example.ecommerce.common.cache.CatalogCacheErrorHandler;
 import com.example.ecommerce.common.cache.CatalogCaches;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.jsontype.impl.LaissezFaireSubTypeValidator;
+import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
+import com.fasterxml.jackson.databind.jsontype.PolymorphicTypeValidator;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
@@ -61,10 +62,11 @@ public class CacheConfiguration implements CachingConfigurer {
 
     private static RedisCacheConfiguration baseConfiguration(ObjectMapper objectMapper) {
         ObjectMapper cacheMapper = objectMapper.copy();
-        // EVERYTHING: catalog values are Java records (final), so NON_FINAL would
-        // omit @class and Redis deserialization would fail.
+        // Catalog values are final records, so DefaultTyping must include them.
+        // LaissezFaire + EVERYTHING would deserialize arbitrary gadgets if Redis
+        // were writable by an attacker — allow only application DTOs and JDK value types.
         cacheMapper.activateDefaultTyping(
-                LaissezFaireSubTypeValidator.instance,
+                catalogTypeValidator(),
                 ObjectMapper.DefaultTyping.EVERYTHING,
                 JsonTypeInfo.As.PROPERTY);
 
@@ -78,5 +80,23 @@ public class CacheConfiguration implements CachingConfigurer {
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(
                         valueSerializer))
                 .disableCachingNullValues();
+    }
+
+    static PolymorphicTypeValidator catalogTypeValidator() {
+        return BasicPolymorphicTypeValidator.builder()
+                .allowIfSubType("com.example.ecommerce.")
+                .allowIfSubType("java.util.")
+                .allowIfSubType("java.math.")
+                .allowIfSubType("java.time.")
+                .allowIfSubType(String.class)
+                .allowIfSubType(Boolean.class)
+                .allowIfSubType(Integer.class)
+                .allowIfSubType(Long.class)
+                .allowIfSubType(Double.class)
+                .allowIfSubType(Float.class)
+                .allowIfSubType(Short.class)
+                .allowIfSubType(Byte.class)
+                .allowIfSubType(Character.class)
+                .build();
     }
 }

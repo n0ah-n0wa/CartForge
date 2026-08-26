@@ -1,20 +1,20 @@
 package com.example.ecommerce.inventory.service;
 
-/**
- * Raised when a requested stock quantity cannot be satisfied.
- * Maps to HTTP 409 ({@code INSUFFICIENT_STOCK}).
- */
-public class InsufficientStockException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+public class InsufficientStockException extends DomainApiException {
 
     private final Long productId;
     private final int available;
     private final int requested;
 
     public InsufficientStockException(Long productId, int available, int requested) {
-        super("Insufficient stock for product %d: available=%d, requested=%d"
-                .formatted(productId, available, requested));
+        super(
+                "INSUFFICIENT_STOCK",
+                HttpStatus.CONFLICT,
+                "Insufficient stock for product %d: available=%d, requested=%d"
+                        .formatted(productId, available, requested));
         this.productId = productId;
         this.available = available;
         this.requested = requested;

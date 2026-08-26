@@ -41,7 +41,7 @@ class AuthRateLimitFilterTest {
                 new ApplicationProperties.Jwt("test-only-jwt-secret-not-for-production-use", 3_600_000L),
                 new ApplicationProperties.Cors(List.of("http://localhost")),
                 new ApplicationProperties.Pagination(20, 100),
-                new ApplicationProperties.RateLimit(new ApplicationProperties.RateLimit.Auth(true, 5, 60)));
+                new ApplicationProperties.RateLimit(new ApplicationProperties.RateLimit.Auth(true, 5, 60, List.of())));
         filter = new AuthRateLimitFilter(authRateLimiter, properties, objectMapper);
     }
 
@@ -94,6 +94,28 @@ class AuthRateLimitFilterTest {
     }
 
     @Test
+    void usesForwardedForWhenRemoteAddrIsATrustedProxy() throws Exception {
+        properties = new ApplicationProperties(
+                new ApplicationProperties.Jwt("test-only-jwt-secret-not-for-production-use", 3_600_000L),
+                new ApplicationProperties.Cors(List.of("http://localhost")),
+                new ApplicationProperties.Pagination(20, 100),
+                new ApplicationProperties.RateLimit(
+                        new ApplicationProperties.RateLimit.Auth(true, 5, 60, List.of("10.0.0.5"))));
+        filter = new AuthRateLimitFilter(authRateLimiter, properties, objectMapper);
+
+        when(authRateLimiter.check(eq("login"), eq("198.51.100.1"))).thenReturn(RateLimitDecision.allow());
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/login");
+        request.setRemoteAddr("10.0.0.5");
+        request.addHeader("X-Forwarded-For", "198.51.100.1, 10.0.0.5");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+        verify(authRateLimiter).check("login", "198.51.100.1");
+    }
+
+    @Test
     void rateLimitsRegistrationSeparatelyAndTreatsBlankRemoteAsUnknown() throws Exception {
         when(authRateLimiter.check(eq("register"), eq("unknown"))).thenReturn(RateLimitDecision.allow());
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/register");
@@ -112,7 +134,7 @@ class AuthRateLimitFilterTest {
                 properties.jwt(),
                 properties.cors(),
                 properties.pagination(),
-                new ApplicationProperties.RateLimit(new ApplicationProperties.RateLimit.Auth(false, 5, 60)));
+                new ApplicationProperties.RateLimit(new ApplicationProperties.RateLimit.Auth(false, 5, 60, List.of())));
         AuthRateLimitFilter disabledFilter = new AuthRateLimitFilter(authRateLimiter, disabled, objectMapper);
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/login");
         MockHttpServletResponse response = new MockHttpServletResponse();

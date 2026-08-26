@@ -1,11 +1,14 @@
 package com.example.ecommerce.inventory.service;
 
+import com.example.ecommerce.common.cache.CatalogCaches;
 import com.example.ecommerce.inventory.dto.StockLevel;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.product.repository.ProductRepository;
 import com.example.ecommerce.product.service.ProductNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,8 +35,22 @@ public class InventoryService {
     }
 
     /**
+     * Locks the product row for checkout and returns the persistence-context
+     * instance that matches the database. Callers must snapshot commercial
+     * fields from this instance before debiting stock so the charged price
+     * matches the locked catalog row (not a stale cart graph copy).
+     */
+    public Product lockForCheckout(Long productId) {
+        return requireProductForMutation(productId);
+    }
+
+    /**
      * Increases available stock (e.g. administrative restock).
      */
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, key = "#productId"),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public StockLevel increaseStock(Long productId, int quantity) {
         requirePositiveQuantity(quantity);
         Product product = requireProductForMutation(productId);
@@ -44,6 +61,10 @@ public class InventoryService {
     /**
      * Decreases available stock (e.g. checkout). Never allows stock to go below zero.
      */
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, key = "#productId"),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public StockLevel decreaseStock(Long productId, int quantity) {
         requirePositiveQuantity(quantity);
         Product product = requireProductForMutation(productId);
@@ -56,6 +77,10 @@ public class InventoryService {
      * Restores stock previously decremented (e.g. order cancellation).
      * Semantically distinct from restock; currently the same stock arithmetic.
      */
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCT, key = "#productId"),
+            @CacheEvict(cacheNames = CatalogCaches.PRODUCTS, allEntries = true)
+    })
     public StockLevel restoreStock(Long productId, int quantity) {
         requirePositiveQuantity(quantity);
         Product product = requireProductForMutation(productId);

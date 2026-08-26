@@ -1,19 +1,11 @@
 package com.example.ecommerce.order.service;
 
-/**
- * Raised when an order cannot be found. Customer reads use the same response
- * whether the id does not exist or belongs to another user.
- */
-public class OrderNotFoundException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private final Long orderId;
+public class OrderNotFoundException extends DomainApiException {
 
     public OrderNotFoundException(Long orderId) {
-        super("Order not found: " + orderId);
-        this.orderId = orderId;
-    }
-
-    public Long getOrderId() {
-        return orderId;
+        super("ORDER_NOT_FOUND", HttpStatus.NOT_FOUND, "Order not found: " + orderId);
     }
 }

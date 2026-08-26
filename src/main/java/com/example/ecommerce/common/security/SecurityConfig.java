@@ -2,8 +2,10 @@ package com.example.ecommerce.common.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.convert.converter.Converter;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -12,7 +14,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
@@ -33,7 +35,7 @@ public class SecurityConfig {
     @Bean
     SecurityFilterChain securityFilterChain(
             HttpSecurity http,
-            JwtAuthenticationConverter converter,
+            Converter<Jwt, ? extends AbstractAuthenticationToken> jwtAuthenticationConverter,
             SecurityProblemHandlers problemHandlers)
             throws Exception {
         http
@@ -47,10 +49,9 @@ public class SecurityConfig {
                         .authenticationEntryPoint(problemHandlers.unauthorized())
                         .accessDeniedHandler(problemHandlers.forbidden()))
                 .authorizeHttpRequests(auth -> {
-                    // Health and Prometheus are intentionally public for probes and
-                    // scrapers (network-restrict Prometheus in deployment). Every
-                    // other Actuator path is denied so a misconfiguration that
-                    // re-enables env/beans/heapdump cannot expose them anonymously.
+                    // Health is public for probes. Prometheus is permitAll at the app
+                    // layer; production Helm enables an API NetworkPolicy so only
+                    // Ingress / monitoring peers can reach the Service port.
                     auth.requestMatchers(
                                     "/actuator/health",
                                     "/actuator/health/**",
@@ -98,7 +99,7 @@ public class SecurityConfig {
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .authenticationEntryPoint(problemHandlers.unauthorized())
                         .accessDeniedHandler(problemHandlers.forbidden())
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(converter)));
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)));
         return http.build();
     }
 

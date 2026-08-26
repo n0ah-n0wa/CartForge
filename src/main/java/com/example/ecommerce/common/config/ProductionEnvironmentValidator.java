@@ -33,7 +33,9 @@ public class ProductionEnvironmentValidator {
         rejectPlaceholder("JWT_SECRET", properties.jwt().secret());
         rejectShortSecret(properties.jwt().secret());
         rejectPlaceholder("DATABASE_PASSWORD", environment.getProperty("DATABASE_PASSWORD"));
-        rejectDevelopmentHost("DATABASE_URL", environment.getProperty("DATABASE_URL"));
+        String databaseUrl = environment.getProperty("DATABASE_URL");
+        rejectDevelopmentHost("DATABASE_URL", databaseUrl);
+        requireDatabaseTls("DATABASE_URL", databaseUrl);
         rejectDevelopmentHost("REDIS_URL", environment.getProperty("REDIS_URL"));
         rejectWildcardCors();
     }
@@ -78,13 +80,31 @@ public class ProductionEnvironmentValidator {
         }
     }
 
+    static void requireDatabaseTls(String name, String jdbcUrl) {
+        if (jdbcUrl == null || jdbcUrl.isBlank()) {
+            return;
+        }
+        String normalized = jdbcUrl.toLowerCase(Locale.ROOT);
+        if (normalized.contains("sslmode=require")
+                || normalized.contains("sslmode=verify-full")
+                || normalized.contains("sslmode=verify-ca")) {
+            return;
+        }
+        throw new IllegalStateException(
+                "Production " + name + " must enforce TLS (sslmode=require, verify-ca, or verify-full)");
+    }
+
     static boolean isUnsafePlaceholder(String value) {
         String normalized = value.trim().toLowerCase(Locale.ROOT);
         return normalized.isEmpty()
                 || normalized.contains("change-me")
+                || normalized.contains("change_me")
                 || normalized.contains("placeholder")
                 || normalized.contains("test-only")
                 || normalized.contains("not-for-production")
+                || normalized.contains("local-k8s-demo")
+                || normalized.contains("demo-only")
+                || normalized.contains("ci-dev-only")
                 || "password".equals(normalized)
                 || "secret".equals(normalized);
     }

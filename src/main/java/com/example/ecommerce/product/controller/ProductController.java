@@ -1,6 +1,5 @@
 package com.example.ecommerce.product.controller;
 
-import com.example.ecommerce.common.config.ApplicationProperties;
 import com.example.ecommerce.common.pagination.PageResponse;
 import com.example.ecommerce.common.security.CurrentUserProvider;
 import com.example.ecommerce.common.security.RequireAdmin;
@@ -8,8 +7,6 @@ import com.example.ecommerce.product.dto.CreateProductCommand;
 import com.example.ecommerce.product.dto.PatchProductCommand;
 import com.example.ecommerce.product.dto.ProductResponse;
 import com.example.ecommerce.product.dto.UpdateProductCommand;
-import com.example.ecommerce.product.service.InvalidProductQueryException;
-import com.example.ecommerce.product.service.ProductSearchCriteria;
 import com.example.ecommerce.product.service.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -41,15 +38,10 @@ public class ProductController {
 
     private final ProductService productService;
     private final CurrentUserProvider currentUser;
-    private final ApplicationProperties properties;
 
-    public ProductController(
-            ProductService productService,
-            CurrentUserProvider currentUser,
-            ApplicationProperties properties) {
+    public ProductController(ProductService productService, CurrentUserProvider currentUser) {
         this.productService = productService;
         this.currentUser = currentUser;
-        this.properties = properties;
     }
 
     @GetMapping
@@ -78,7 +70,7 @@ public class ProductController {
         // Read raw sort values so "sort=price,asc" stays one token. Binding to
         // List/String[] would CSV-split on the comma and treat "asc" as a field name.
         // Page/size are resolved here so Redis cache keys match the query actually run.
-        ProductSearchCriteria criteria = ProductSearchCriteria.of(
+        return productService.searchResponsesForCaller(
                 category,
                 minPrice,
                 maxPrice,
@@ -86,20 +78,8 @@ public class ProductController {
                 page,
                 size,
                 sortParams(request),
-                resolveActiveFilter(active),
-                properties.pagination().defaultPageSize(),
-                properties.pagination().maxPageSize());
-        return productService.searchResponses(criteria);
-    }
-
-    private Boolean resolveActiveFilter(Boolean active) {
-        if (currentUser.isAdmin()) {
-            return active;
-        }
-        if (active != null) {
-            throw new InvalidProductQueryException("active filter requires administrator privileges");
-        }
-        return Boolean.TRUE;
+                active,
+                currentUser.isAdmin());
     }
 
     private static List<String> sortParams(HttpServletRequest request) {

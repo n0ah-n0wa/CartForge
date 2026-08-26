@@ -1,15 +1,12 @@
 package com.example.ecommerce.auth.service;
 
-/**
- * Raised for every failed login. The message is deliberately identical whether
- * the address is unknown, the password is wrong, or the account is disabled, so
- * the API cannot be used to enumerate registered users.
- */
-public class InvalidCredentialsException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+/** Failed login — uniform message to prevent user enumeration. */
+public class InvalidCredentialsException extends DomainApiException {
 
     public InvalidCredentialsException() {
-        super("Invalid email or password");
+        super("INVALID_CREDENTIALS", HttpStatus.UNAUTHORIZED, "Invalid email or password");
     }
 }

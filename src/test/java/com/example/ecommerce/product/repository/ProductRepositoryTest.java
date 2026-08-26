@@ -10,6 +10,7 @@ import com.example.ecommerce.category.service.CategoryService;
 import com.example.ecommerce.common.persistence.CurrencyCode;
 import com.example.ecommerce.common.persistence.PersistenceConventions;
 import com.example.ecommerce.product.entity.Product;
+import com.example.ecommerce.product.service.ProductCategoryReference;
 import com.example.ecommerce.product.service.ProductSearchCriteria;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
@@ -192,6 +193,27 @@ class ProductRepositoryTest {
         assertThat(moved.getCategory().getId()).isEqualTo(target.getId());
         assertThat(moved.getVersion()).isEqualTo(1L);
         assertThat(categoryRepository.findById(source.getId())).isEmpty();
+    }
+
+    @Test
+    void reassignProcessesProductsInBoundedBatchesWithoutLeavingStragglers() {
+        Category source = persistedCategory("Books", "books");
+        Category target = persistedCategory("Media", "media");
+        for (int i = 0; i < 5; i++) {
+            productRepository.saveAndFlush(product("SKU-" + i, "slug-" + i, source));
+        }
+
+        ProductCategoryReference reference =
+                new ProductCategoryReference(productRepository, categoryRepository, 2);
+        assertThat(reference.reassign(source.getId(), target.getId())).isEqualTo(5);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(productRepository.countByCategoryId(source.getId())).isZero();
+        assertThat(productRepository.countByCategoryId(target.getId())).isEqualTo(5);
+        assertThat(productRepository.findByCategoryId(target.getId(), PageRequest.of(0, 10)))
+                .extracting(Product::getVersion)
+                .containsOnly(1L);
     }
 
     @Test

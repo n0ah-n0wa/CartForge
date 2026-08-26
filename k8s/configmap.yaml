@@ -8,12 +8,11 @@ metadata:
     app.kubernetes.io/component: api
     app.kubernetes.io/part-of: cartforge
 data:
-  SPRING_PROFILES_ACTIVE: "prod"
+  SPRING_PROFILES_ACTIVE: "dev"
   SERVER_PORT: "8080"
   LOGGING_LEVEL_ROOT: "INFO"
   DATABASE_URL: "jdbc:postgresql://cartforge-postgres:5432/ecommerce"
   DATABASE_USERNAME: "ecommerce"
-  REDIS_URL: "redis://cartforge-redis:6379"
   JWT_EXPIRATION: "3600000"
   CORS_ORIGINS: "http://cartforge.local"
   APP_PAGINATION_DEFAULT_PAGE_SIZE: "20"
@@ -21,4 +20,5 @@ data:
   APP_RATE_LIMIT_AUTH_ENABLED: "true"
   APP_RATE_LIMIT_AUTH_LIMIT: "20"
   APP_RATE_LIMIT_AUTH_WINDOW_SECONDS: "60"
+  APP_SEED_ENABLED: "false"
   JAVA_OPTS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8"

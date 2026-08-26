@@ -22,6 +22,14 @@ spring:
     driver-class-name: org.postgresql.Driver
     hikari:
       pool-name: ecommerce-db
+      # Explicit sizing (Boot default maximumPoolSize is 10). Override per environment.
+      maximum-pool-size: ${DATABASE_POOL_SIZE:10}
+      minimum-idle: ${DATABASE_POOL_MIN_IDLE:10}
+      connection-timeout: ${DATABASE_POOL_CONNECTION_TIMEOUT_MS:3000}
+      validation-timeout: 1000
+      idle-timeout: ${DATABASE_POOL_IDLE_TIMEOUT_MS:600000}
+      max-lifetime: ${DATABASE_POOL_MAX_LIFETIME_MS:1800000}
+      leak-detection-threshold: ${DATABASE_POOL_LEAK_DETECTION_MS:0}
   jpa:
     open-in-view: false
     hibernate:
@@ -134,6 +142,12 @@ app:
       enabled: ${APP_RATE_LIMIT_AUTH_ENABLED:true}
       limit: ${APP_RATE_LIMIT_AUTH_LIMIT:20}
       window-seconds: ${APP_RATE_LIMIT_AUTH_WINDOW_SECONDS:60}
+      # Override with env APP_RATE_LIMIT_AUTH_TRUSTED_PROXIES (comma-separated Ingress IPs).
+      trusted-proxies: []
+  seed:
+    enabled: false
+  security:
+    account-cache-ttl-seconds: ${APP_SECURITY_ACCOUNT_CACHE_TTL_SECONDS:10}
 
 springdoc:
   default-produces-media-type: application/json

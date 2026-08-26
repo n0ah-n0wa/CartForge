@@ -2,7 +2,7 @@
 # Local CI validation helper. Mirrors the GitHub Actions packaging gates.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HELM="${HELM:-helm}"
 DOCKER="${DOCKER:-docker}"
 
@@ -17,11 +17,19 @@ test -n "$(ls target/ecommerce-api-*.jar)"
 $DOCKER build -f Dockerfile -t cartforge-api:local-ci .
 
 echo "==> Helm lint"
-$HELM lint helm/cartforge -f helm/cartforge/values-dev.yaml
-$HELM lint helm/cartforge -f helm/cartforge/values-prod.yaml
+$HELM lint helm/cartforge -f helm/cartforge/values-dev.yaml \
+  --set-string secrets.postgresPassword='ci-dev-only-postgres-password' \
+  --set-string secrets.jwtSecret='ci-dev-only-jwt-secret-32chars-minimum!!' \
+  --set-string secrets.redisPassword='ci-dev-only-redis-password'
+$HELM lint helm/cartforge -f helm/cartforge/values-prod.yaml \
+  --set image.tag=local-ci
 
 echo "==> Helm template"
-$HELM template cartforge helm/cartforge -f helm/cartforge/values-dev.yaml > /tmp/cartforge-dev.yaml
+$HELM template cartforge helm/cartforge -f helm/cartforge/values-dev.yaml \
+  --set-string secrets.postgresPassword='ci-dev-only-postgres-password' \
+  --set-string secrets.jwtSecret='ci-dev-only-jwt-secret-32chars-minimum!!' \
+  --set-string secrets.redisPassword='ci-dev-only-redis-password' \
+  > /tmp/cartforge-dev.yaml
 $HELM template cartforge helm/cartforge -f helm/cartforge/values-prod.yaml \
   --set image.tag=local-ci > /tmp/cartforge-prod.yaml
 test -s /tmp/cartforge-dev.yaml

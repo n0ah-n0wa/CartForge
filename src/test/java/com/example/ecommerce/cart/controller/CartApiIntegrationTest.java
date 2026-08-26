@@ -362,7 +362,7 @@ class CartApiIntegrationTest {
                         .contentType(APPLICATION_JSON)
                         .content(addBody(keyboard.getId(), 1)))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("CART_OWNER_NOT_FOUND"));
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 
     @Test

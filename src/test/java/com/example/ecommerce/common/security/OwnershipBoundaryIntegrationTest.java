@@ -197,13 +197,9 @@ class OwnershipBoundaryIntegrationTest {
     void requireAdminRuleDeniesCustomersAndAllowsAdministrators() throws Exception {
         mockMvc.perform(get("/probe/admin-only").header(HttpHeaders.AUTHORIZATION, bearer(alice)))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(get("/probe/admin-only")
-                        .header(
-                                HttpHeaders.AUTHORIZATION,
-                                "Bearer "
-                                        + jwtTokenService
-                                                .issue(new AuthenticatedUser(99L, "root@example.com", UserRole.ADMIN))
-                                                .accessToken()))
+        User admin = userRepository.saveAndFlush(
+                User.create("root@example.com", "test-only-password-hash", "Root", "Admin", UserRole.ADMIN));
+        mockMvc.perform(get("/probe/admin-only").header(HttpHeaders.AUTHORIZATION, bearer(admin)))
                 .andExpect(status().isOk())
                 .andExpect(content().string("ok"));
     }

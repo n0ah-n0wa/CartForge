@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -18,6 +19,7 @@ import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.common.persistence.CurrencyCode;
 import com.example.ecommerce.common.security.CurrentUserProvider;
 import com.example.ecommerce.inventory.service.InsufficientStockException;
+import com.example.ecommerce.inventory.service.InventoryService;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.product.repository.ProductRepository;
 import com.example.ecommerce.product.service.ProductNotFoundException;
@@ -50,6 +52,9 @@ class CartServiceTest {
     private UserRepository userRepository;
 
     @Mock
+    private InventoryService inventoryService;
+
+    @Mock
     private CurrentUserProvider currentUserProvider;
 
     private final CartMapper cartMapper = new CartMapper();
@@ -62,6 +67,7 @@ class CartServiceTest {
                 cartRepository,
                 productRepository,
                 userRepository,
+                inventoryService,
                 currentUserProvider,
                 cartMapper);
     }
@@ -168,6 +174,10 @@ class CartServiceTest {
         when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(Cart.forUser(user(USER_ID))));
         when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(activeProduct(2)));
 
+        doThrow(new InsufficientStockException(PRODUCT_ID, 2, 3))
+                .when(inventoryService)
+                .validateAvailability(PRODUCT_ID, 3);
+
         assertThatThrownBy(() -> cartService.addItem(new AddCartItemCommand(PRODUCT_ID, 3)))
                 .isInstanceOf(InsufficientStockException.class)
                 .hasMessageContaining("2");
@@ -181,6 +191,10 @@ class CartServiceTest {
         Cart cart = cartWithProduct(product, 4);
         when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
         when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product));
+
+        doThrow(new InsufficientStockException(PRODUCT_ID, 5, 6))
+                .when(inventoryService)
+                .validateAvailability(PRODUCT_ID, 6);
 
         assertThatThrownBy(() -> cartService.addItem(new AddCartItemCommand(PRODUCT_ID, 2)))
                 .isInstanceOf(InsufficientStockException.class);
@@ -218,6 +232,10 @@ class CartServiceTest {
         when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
         Product product = activeProduct(3);
         when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product));
+
+        doThrow(new InsufficientStockException(PRODUCT_ID, 3, 5))
+                .when(inventoryService)
+                .validateAvailability(PRODUCT_ID, 5);
 
         assertThatThrownBy(() -> cartService.updateItem(PRODUCT_ID, new UpdateCartItemCommand(5)))
                 .isInstanceOf(InsufficientStockException.class);

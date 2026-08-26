@@ -46,3 +46,29 @@ spec:
       ports:
         - protocol: TCP
           port: 6379
+---
+# Restrict who may reach the API Service port (8080). Adjust ingress namespace labels
+# for your cluster. These manifests target local/demo use with ingress-nginx.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cartforge-api
+  namespace: cartforge
+  labels:
+    app.kubernetes.io/name: cartforge-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: cartforge
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cartforge-api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080

@@ -5,13 +5,11 @@ import com.example.ecommerce.user.UserRole;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.List;
 import java.util.Objects;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -23,7 +21,6 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 
 /**
  * HMAC signing for self-contained access tokens. The secret comes from
@@ -89,23 +86,6 @@ public class JwtConfig {
         } catch (IllegalArgumentException unknown) {
             return false;
         }
-    }
-
-    /**
-     * Turns the signed {@code role} claim into a Spring Security authority. The
-     * claim is trusted only because the signature has already been verified.
-     */
-    @Bean
-    JwtAuthenticationConverter jwtAuthenticationConverter() {
-        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
-        converter.setJwtGrantedAuthoritiesConverter(jwt -> {
-            String role = jwt.getClaimAsString(JwtClaims.ROLE);
-            if (!isKnownRole(role)) {
-                return List.of();
-            }
-            return List.of(new SimpleGrantedAuthority("ROLE_" + role));
-        });
-        return converter;
     }
 
     static SecretKey signingKey(ApplicationProperties properties) {

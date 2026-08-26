@@ -100,9 +100,9 @@ Anonymous/customer product listings are **active-only**. The `active` query para
 
 ### Customer
 
-Authenticated customers access their own cart and orders. Ownership comes from the JWT `sub` via `CurrentUserProvider` — never from a client-supplied `userId`.
+Authenticated customers access their own cart, orders, and profile (`GET /api/v1/users/me`). Ownership comes from the JWT `sub` via `CurrentUserProvider` — never from a client-supplied `userId`.
 
-**Not implemented:** dedicated profile endpoint (`GET /api/v1/users/me`).
+Disabled accounts are rejected on every Bearer request (not only at login).
 
 Customers must not: modify another cart/order, change order status, create admins, or mutate catalog/inventory.
 
@@ -112,7 +112,7 @@ Customers must not: modify another cart/order, change order status, create admin
 - `/api/v1/admin/orders/**` requires `ADMIN`
 - Customer cancel path is `POST /api/v1/orders/{id}/cancel` (not a status PATCH on the customer resource)
 
-Provision `ADMIN` out-of-band (DB / controlled tooling). Registration cannot create admins. No automatic seed admin is shipped.
+Provision `ADMIN` out-of-band or via optional **dev seed** (`app.seed.enabled` on profile `dev` only). Registration cannot create admins. Production must keep seed disabled.
 
 ## Ownership boundary
 
@@ -126,7 +126,8 @@ Provision `ADMIN` out-of-band (DB / controlled tooling). Registration cannot cre
 - Do not log passwords, hashes, JWTs, secrets, or full `Authorization` headers
 - `RegistrationRequest`, `LoginRequest`, `AccessTokenResponse` redact `toString`
 - Disabled users cannot authenticate (reported as invalid credentials)
-- Tokens issued before disablement remain valid until `exp` (no denylist)
+- Tokens for disabled users are rejected on each request (`EnabledAccountJwtAuthenticationConverter`)
+- Authorities come from the **database role** (JWT `role` claim is not trusted for authorization; demotion is immediate)
 
 ## Input validation and errors
 
@@ -166,14 +167,14 @@ See [ADR 0008](adr/0008-auth-rate-limiting.md).
 
 Do not commit `.env`, JWT secrets, DB passwords, kubeconfigs, or private keys. Placeholders only in `.env.example`.
 
-Kubernetes: inject via Secret resources (`cartforge-secrets`), never ConfigMaps. Images must not embed secrets. CD sets `secrets.create=false` and references an existing Secret.
+Kubernetes: inject via Secret resources (`cartforge-secrets`), never ConfigMaps (`REDIS_URL` included). Images must not embed secrets. CD sets `secrets.create=false` and references an existing Secret. Rotate any credentials that ever appeared in git history (for example former `local-k8s-demo-*` placeholders).
 
 ## Actuator and HTTP hardening
 
 | Path | Access |
 |---|---|
 | `/actuator/health`, `/actuator/health/**` | Public (probes) |
-| `/actuator/prometheus` | Public (network-restrict in real deployments) |
+| `/actuator/prometheus` | Public at the app layer; **prod Helm requires NetworkPolicy** so only Ingress / monitoring peers reach the Service |
 | Other `/actuator/**` | `denyAll` (401 anonymous / 403 authenticated) |
 
 - `show-details` / `show-components`: never
@@ -197,6 +198,7 @@ Covered by the suite, including:
 - Customer 403 on catalog writes, admin APIs, nested catalog paths
 - Cross-customer cart/order access rejected
 - Invalid / expired / foreign-signed / alg-confused JWTs → 401
+- Disabled accounts and demoted admins lose access before JWT `exp`
 - Registration cannot create `ADMIN`; passwords absent from responses
 - CORS refuses unlisted origins; secure headers present
 - Actuator non-health paths denied

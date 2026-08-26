@@ -18,6 +18,12 @@
         <Package name="~com\.example\.ecommerce\..*\.controller"/>
         <Bug pattern="EI_EXPOSE_REP2"/>
     </Match>
+    <!-- OrderService depends on the cart checkout port (Spring bean) by design. -->
+    <Match>
+        <Class name="com.example.ecommerce.order.service.OrderService"/>
+        <Field name="cartCheckoutPort"/>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
     <!-- Rate limiters hold Spring-managed Redis templates by design. -->
     <Match>
         <Class name="com.example.ecommerce.common.ratelimit.RedisFixedWindowAuthRateLimiter"/>

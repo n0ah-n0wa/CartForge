@@ -54,7 +54,10 @@ app.kubernetes.io/component: api
 {{- end }}
 
 {{- define "cartforge.image" -}}
-{{- $tag := .Values.image.tag | default .Chart.AppVersion }}
+{{- $tag := required "image.tag is required (use an immutable git SHA for production; Chart.AppVersion is never used as a fallback)" .Values.image.tag }}
+{{- if contains "SNAPSHOT" $tag }}
+{{- fail (printf "image.tag must not contain SNAPSHOT (got %q)" $tag) }}
+{{- end }}
 {{- printf "%s:%s" .Values.image.repository $tag }}
 {{- end }}
 
@@ -75,6 +78,22 @@ app.kubernetes.io/component: api
 {{- end }}
 {{- if not .Values.secrets.jwtSecret }}
 {{- fail "secrets.jwtSecret is required when secrets.create is true (use --set-string or a values-secrets.yaml file)" }}
+{{- end }}
+{{- end }}
+{{- if and .Values.secrets.create .Values.secrets.jwtSecret }}
+{{- if lt (len .Values.secrets.jwtSecret) 32 }}
+{{- fail (printf "secrets.jwtSecret must be at least 32 characters (got %d)" (len .Values.secrets.jwtSecret)) }}
+{{- end }}
+{{- end }}
+{{- if and .Values.demoInfrastructure.redis.enabled (not .Values.redis.url) (not .Values.secrets.redisPassword) }}
+{{- fail "demo Redis requires secrets.redisPassword (for REDIS_URL) or an explicit redis.url that includes AUTH credentials" }}
+{{- end }}
+{{- if eq .Values.config.springProfilesActive "prod" }}
+{{- if not .Values.networkPolicy.enabled }}
+{{- fail "networkPolicy.enabled must be true when config.springProfilesActive is prod (Prometheus and the API Service must not be cluster-wide reachable)" }}
+{{- end }}
+{{- if not .Values.ingress.tls }}
+{{- fail "ingress.tls must be configured when config.springProfilesActive is prod (TLS terminates Bearer tokens in transit)" }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -114,6 +133,8 @@ app.kubernetes.io/component: api
 {{- define "cartforge.redisUrl" -}}
 {{- if .Values.redis.url }}
 {{- .Values.redis.url }}
+{{- else if and .Values.demoInfrastructure.redis.enabled .Values.secrets.redisPassword }}
+{{- printf "redis://:%s@%s:%v" (.Values.secrets.redisPassword | urlquery) (include "cartforge.redisHost" .) .Values.redis.port }}
 {{- else }}
 {{- printf "redis://%s:%v" (include "cartforge.redisHost" .) .Values.redis.port }}
 {{- end }}

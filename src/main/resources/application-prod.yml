@@ -6,6 +6,14 @@ spring:
     url: ${DATABASE_URL}
     username: ${DATABASE_USERNAME}
     password: ${DATABASE_PASSWORD}
+    hikari:
+      # Sized for a small multi-replica API; raise DATABASE_POOL_SIZE with pod count × load.
+      maximum-pool-size: ${DATABASE_POOL_SIZE:20}
+      minimum-idle: ${DATABASE_POOL_MIN_IDLE:5}
+      connection-timeout: ${DATABASE_POOL_CONNECTION_TIMEOUT_MS:3000}
+      idle-timeout: ${DATABASE_POOL_IDLE_TIMEOUT_MS:600000}
+      max-lifetime: ${DATABASE_POOL_MAX_LIFETIME_MS:1800000}
+      leak-detection-threshold: ${DATABASE_POOL_LEAK_DETECTION_MS:60000}
   data:
     redis:
       url: ${REDIS_URL}
@@ -22,6 +30,8 @@ app:
   pagination:
     default-page-size: ${APP_PAGINATION_DEFAULT_PAGE_SIZE:20}
     max-page-size: ${APP_PAGINATION_MAX_PAGE_SIZE:100}
+  seed:
+    enabled: false
 
 management:
   endpoints:

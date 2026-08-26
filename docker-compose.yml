@@ -41,8 +41,9 @@ services:
     image: redis:7.4-alpine
     networks:
       - cartforge
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--save", "", "--appendonly", "no"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -52,7 +53,9 @@ services:
   application:
     build:
       context: .
-      dockerfile: ${DOCKERFILE:-Dockerfile}
+      # Default builds inside Docker so `docker compose up --build` works after copying .env.
+      # CI packaging may set DOCKERFILE=Dockerfile with a prebuilt JAR.
+      dockerfile: ${DOCKERFILE:-docker/Dockerfile.ci}
     image: cartforge-api:local
     networks:
       - cartforge
@@ -72,7 +75,7 @@ services:
       DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
       DATABASE_USERNAME: ${POSTGRES_USER}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION: ${JWT_EXPIRATION}
       CORS_ORIGINS: ${CORS_ORIGINS}
@@ -81,6 +84,7 @@ services:
       APP_RATE_LIMIT_AUTH_ENABLED: ${APP_RATE_LIMIT_AUTH_ENABLED}
       APP_RATE_LIMIT_AUTH_LIMIT: ${APP_RATE_LIMIT_AUTH_LIMIT}
       APP_RATE_LIMIT_AUTH_WINDOW_SECONDS: ${APP_RATE_LIMIT_AUTH_WINDOW_SECONDS}
+      APP_SEED_ENABLED: ${APP_SEED_ENABLED:-true}
       JAVA_OPTS: ${JAVA_OPTS:-}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/actuator/health/readiness"]

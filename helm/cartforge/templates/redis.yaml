@@ -1,4 +1,5 @@
 {{- if .Values.demoInfrastructure.redis.enabled }}
+{{- include "cartforge.validateSecrets" . }}
 # Demo in-cluster Redis - not a production-managed cache service.
 apiVersion: apps/v1
 kind: Deployment
@@ -35,10 +36,18 @@ spec:
           imagePullPolicy: IfNotPresent
           args:
             - redis-server
+            - --requirepass
+            - $(REDIS_PASSWORD)
             - --save
             - ""
             - --appendonly
             - "no"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cartforge.secretName" . }}
+                  key: {{ .Values.secrets.redisPasswordKey }}
           ports:
             - name: redis
               containerPort: 6379
@@ -46,6 +55,8 @@ spec:
             exec:
               command:
                 - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
                 - ping
             initialDelaySeconds: 5
             periodSeconds: 5
@@ -54,6 +65,8 @@ spec:
             exec:
               command:
                 - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
                 - ping
             initialDelaySeconds: 15
             periodSeconds: 10

@@ -41,6 +41,14 @@ class UserTest {
     }
 
     @Test
+    void assignRoleUpdatesThePersistedRole() {
+        User user = User.create("root@example.com", "{bcrypt}hash", "Root", "Admin", UserRole.ADMIN);
+        user.assignRole(UserRole.CUSTOMER);
+        assertThat(user.getRole()).isEqualTo(UserRole.CUSTOMER);
+        assertThatThrownBy(() -> user.assignRole(null)).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
     void replacePasswordHashRejectsBlankAndToStringOmitsTheHash() {
         User user = User.registerCustomer("ada@example.com", "{bcrypt}old", "Ada", "Lovelace");
         user.replacePasswordHash("{bcrypt}new");

@@ -20,9 +20,9 @@ On successful login, issue a signed **JWT access token** (`JwtTokenService`). Cl
 | Passwords | `DelegatingPasswordEncoder` (BCrypt by default); hashes never returned |
 | Registration role | Always `CUSTOMER`; no role field on the request |
 
-`ADMIN` is provisioned **out-of-band** (controlled tooling / DB). No automatic seed admin is shipped.
+`ADMIN` is provisioned **out-of-band** or via optional **dev seed** (`app.seed.enabled`, never on `prod`). Registration cannot create admins.
 
-Refresh tokens, cookie sessions, logout denylist, and OAuth social login are out of scope.
+Refresh tokens, cookie sessions, logout denylist, and OAuth social login are out of scope. **Disabled accounts are rejected on every Bearer request** (`EnabledAccountJwtAuthenticationConverter` loads the user and requires `enabled=true`), not only at login. **Authorities are taken from the database role**, not the JWT `role` claim, so demotion takes effect before token expiry.
 
 ## Alternatives considered
 
@@ -32,10 +32,10 @@ Refresh tokens, cookie sessions, logout denylist, and OAuth social login are out
 | Asymmetric JWT (RS256) | More key-management ops; HS256 meets the portfolio scope |
 | Opaque tokens in Redis | Couples auth to Redis availability; conflicts with fail-open posture |
 | Allow registration to create `ADMIN` | Privilege-escalation risk; forbidden by design |
+| Trust JWT `role` claim for authorities | Stale admin tokens after demotion; privilege sticks until `exp` |
 
 ## Consequences
 
-- Authorization uses JWT `sub` / `role` via `CurrentUserProvider`.
-- Expired or invalid tokens → 401; cross-customer access → 403.
-- Tokens disabled-user issued remain valid until `exp` (no denylist).
+- Authorization uses JWT `sub` for identity; **role/authorities come from the DB** on each request.
+- Expired or invalid tokens → 401; cross-customer access → 403; demoted admins lose `ROLE_ADMIN` immediately.
 - JWTs, passwords, and hashes must never appear in logs or `toString`.

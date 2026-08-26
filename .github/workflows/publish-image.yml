@@ -5,6 +5,8 @@
 #   ghcr.io/<owner>/ecommerce-api:latest      (convenience only; main only)
 #
 # Authentication uses the job GITHUB_TOKEN. Credentials are never printed.
+# Manual workflow_dispatch publishes only a SHA that already has a successful CI run
+# (the verified JAR artifact is downloaded — no -DskipTests rebuild).
 
 name: Publish Image
 
@@ -19,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       git_sha:
-        description: Full git SHA to build and publish (must exist on the default branch)
+        description: Full git SHA to build and publish (must have a successful CI run on the default branch)
         required: true
         type: string
 
@@ -59,25 +61,41 @@ jobs:
     steps:
       - name: Resolve source revision
         id: rev
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             SHA="${{ inputs.git_sha }}"
-            RUN_ID=""
+            if [[ ! "${SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Refusing to publish: expected a full 40-character git SHA, got '${SHA}'" >&2
+              exit 1
+            fi
+            RUN_ID="$(gh run list \
+              --repo "${{ github.repository }}" \
+              --workflow CI \
+              --commit "${SHA}" \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty')"
+            if [[ -z "${RUN_ID}" ]]; then
+              echo "Refusing to publish: no successful CI run found for ${SHA}" >&2
+              exit 1
+            fi
           else
             SHA="${{ github.event.workflow_run.head_sha }}"
             RUN_ID="${{ github.event.workflow_run.id }}"
-          fi
-
-          if [[ ! "${SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Refusing to publish: expected a full 40-character git SHA, got '${SHA}'" >&2
-            exit 1
+            if [[ ! "${SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Refusing to publish: expected a full 40-character git SHA, got '${SHA}'" >&2
+              exit 1
+            fi
           fi
 
           echo "sha=${SHA}" >> "${GITHUB_OUTPUT}"
           echo "short_sha=${SHA:0:12}" >> "${GITHUB_OUTPUT}"
           echo "run_id=${RUN_ID}" >> "${GITHUB_OUTPUT}"
-          echo "Publishing revision ${SHA}"
+          echo "Publishing revision ${SHA} from CI run ${RUN_ID}"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -86,28 +104,12 @@ jobs:
           fetch-depth: 1
 
       - name: Download verified JAR from CI
-        if: github.event_name == 'workflow_run'
         uses: actions/download-artifact@v4
         with:
           name: application-jar
           path: target
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ steps.rev.outputs.run_id }}
-
-      - name: Set up Java 21
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: maven
-
-      - name: Package JAR for manual publish
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          set -euo pipefail
-          chmod +x mvnw
-          ./mvnw -B -DskipTests package
 
       - name: Verify JAR artifact
         run: |
@@ -174,6 +176,7 @@ jobs:
               echo "- Convenience tag: \`latest\`"
             fi
             echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo "- CI run: \`${{ steps.rev.outputs.run_id }}\`"
             echo ""
             echo "Kubernetes / Helm example:"
             echo ""

@@ -1,31 +1,6 @@
 package com.example.ecommerce.common.exception;
 
-import com.example.ecommerce.auth.service.DuplicateEmailException;
-import com.example.ecommerce.auth.service.InvalidCredentialsException;
-import com.example.ecommerce.cart.service.CartItemNotFoundException;
-import com.example.ecommerce.cart.service.CartOwnerNotFoundException;
-import com.example.ecommerce.cart.service.InactiveProductForCartException;
-import com.example.ecommerce.cart.service.InvalidCartQuantityException;
-import com.example.ecommerce.category.service.CategoryInUseException;
-import com.example.ecommerce.category.service.CategoryNotFoundException;
-import com.example.ecommerce.category.service.DuplicateCategoryException;
 import com.example.ecommerce.common.logging.CorrelationIds;
-import com.example.ecommerce.common.pagination.InvalidSortException;
-import com.example.ecommerce.inventory.service.InsufficientStockException;
-import com.example.ecommerce.inventory.service.InvalidInventoryQuantityException;
-import com.example.ecommerce.inventory.service.InventoryConflictException;
-import com.example.ecommerce.order.OrderStatusTransitionException;
-import com.example.ecommerce.order.service.EmptyCartException;
-import com.example.ecommerce.order.service.IdempotencyKeyConflictException;
-import com.example.ecommerce.order.service.InactiveProductForCheckoutException;
-import com.example.ecommerce.order.service.InvalidIdempotencyKeyException;
-import com.example.ecommerce.order.service.OrderNotFoundException;
-import com.example.ecommerce.order.service.OrderOwnerNotFoundException;
-import com.example.ecommerce.product.service.DuplicateProductException;
-import com.example.ecommerce.product.service.InvalidProductCategoryException;
-import com.example.ecommerce.product.service.InvalidProductQueryException;
-import com.example.ecommerce.product.service.ProductNotFoundException;
-import com.example.ecommerce.product.service.ProductVersionConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -62,11 +37,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     private static final String CONCURRENT_MODIFICATION_MESSAGE = "The resource was modified concurrently";
+    private static final String GENERIC_INVALID_REQUEST = "The request could not be processed";
 
-    @ExceptionHandler(InvalidCredentialsException.class)
-    ResponseEntity<ApiErrorResponse> invalidCredentials(
-            InvalidCredentialsException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", exception.getMessage(), request);
+    @ExceptionHandler(DomainApiException.class)
+    ResponseEntity<ApiErrorResponse> domainApi(DomainApiException exception, HttpServletRequest request) {
+        logDomainFailure(exception, request);
+        return ApiErrors.entity(
+                exception.httpStatus(), exception.errorCode(), exception.getMessage(), request);
     }
 
     @ExceptionHandler(AuthenticationException.class)
@@ -81,138 +58,6 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ApiErrors.entity(HttpStatus.FORBIDDEN, "FORBIDDEN", "Access is denied", request);
     }
 
-    @ExceptionHandler(DuplicateEmailException.class)
-    ResponseEntity<ApiErrorResponse> duplicateEmail(
-            DuplicateEmailException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.CONFLICT, "DUPLICATE_EMAIL", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(CategoryNotFoundException.class)
-    ResponseEntity<ApiErrorResponse> categoryNotFound(
-            CategoryNotFoundException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.NOT_FOUND, "CATEGORY_NOT_FOUND", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(ProductNotFoundException.class)
-    ResponseEntity<ApiErrorResponse> productNotFound(
-            ProductNotFoundException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(CartItemNotFoundException.class)
-    ResponseEntity<ApiErrorResponse> cartItemNotFound(
-            CartItemNotFoundException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.NOT_FOUND, "CART_ITEM_NOT_FOUND", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(OrderNotFoundException.class)
-    ResponseEntity<ApiErrorResponse> orderNotFound(OrderNotFoundException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(CartOwnerNotFoundException.class)
-    ResponseEntity<ApiErrorResponse> cartOwnerNotFound(
-            CartOwnerNotFoundException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.UNAUTHORIZED, "CART_OWNER_NOT_FOUND", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(OrderOwnerNotFoundException.class)
-    ResponseEntity<ApiErrorResponse> orderOwnerNotFound(
-            OrderOwnerNotFoundException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.UNAUTHORIZED, "ORDER_OWNER_NOT_FOUND", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler({InactiveProductForCartException.class, InactiveProductForCheckoutException.class})
-    ResponseEntity<ApiErrorResponse> inactiveProduct(RuntimeException exception, HttpServletRequest request) {
-        log.warn(
-                "event=checkout_or_cart_conflict code=INACTIVE_PRODUCT path={} message={}",
-                request.getRequestURI(),
-                exception.getMessage());
-        return ApiErrors.entity(HttpStatus.BAD_REQUEST, "INACTIVE_PRODUCT", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(InsufficientStockException.class)
-    ResponseEntity<ApiErrorResponse> insufficientStock(
-            InsufficientStockException exception, HttpServletRequest request) {
-        log.warn(
-                "event=checkout_or_cart_conflict code=INSUFFICIENT_STOCK path={} message={}",
-                request.getRequestURI(),
-                exception.getMessage());
-        return ApiErrors.entity(HttpStatus.CONFLICT, "INSUFFICIENT_STOCK", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(InvalidInventoryQuantityException.class)
-    ResponseEntity<ApiErrorResponse> invalidInventoryQuantity(
-            InvalidInventoryQuantityException exception, HttpServletRequest request) {
-        return ApiErrors.entity(
-                HttpStatus.BAD_REQUEST, "INVALID_INVENTORY_QUANTITY", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(InventoryConflictException.class)
-    ResponseEntity<ApiErrorResponse> inventoryConflict(
-            InventoryConflictException exception, HttpServletRequest request) {
-        log.warn(
-                "event=inventory_conflict code=INVENTORY_CONFLICT path={} message={}",
-                request.getRequestURI(),
-                exception.getMessage());
-        return ApiErrors.entity(HttpStatus.CONFLICT, "INVENTORY_CONFLICT", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(EmptyCartException.class)
-    ResponseEntity<ApiErrorResponse> emptyCart(EmptyCartException exception, HttpServletRequest request) {
-        log.warn("event=checkout_failed code=EMPTY_CART path={}", request.getRequestURI());
-        return ApiErrors.entity(HttpStatus.CONFLICT, "EMPTY_CART", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(InvalidIdempotencyKeyException.class)
-    ResponseEntity<ApiErrorResponse> invalidIdempotencyKey(
-            InvalidIdempotencyKeyException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.BAD_REQUEST, "IDEMPOTENCY_KEY_INVALID", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(IdempotencyKeyConflictException.class)
-    ResponseEntity<ApiErrorResponse> idempotencyKeyConflict(
-            IdempotencyKeyConflictException exception, HttpServletRequest request) {
-        log.warn("event=checkout_failed code=IDEMPOTENCY_KEY_REUSED path={}", request.getRequestURI());
-        return ApiErrors.entity(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(OrderStatusTransitionException.class)
-    ResponseEntity<ApiErrorResponse> orderStatusTransition(
-            OrderStatusTransitionException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.CONFLICT, "ORDER_STATUS_TRANSITION", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(InvalidCartQuantityException.class)
-    ResponseEntity<ApiErrorResponse> invalidCartQuantity(
-            InvalidCartQuantityException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.BAD_REQUEST, "INVALID_CART_QUANTITY", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(CategoryInUseException.class)
-    ResponseEntity<ApiErrorResponse> categoryInUse(CategoryInUseException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.CONFLICT, "CATEGORY_IN_USE", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(DuplicateCategoryException.class)
-    ResponseEntity<ApiErrorResponse> duplicateCategory(
-            DuplicateCategoryException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.CONFLICT, exception.code(), exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(DuplicateProductException.class)
-    ResponseEntity<ApiErrorResponse> duplicateProduct(
-            DuplicateProductException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.CONFLICT, exception.code(), exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(ProductVersionConflictException.class)
-    ResponseEntity<ApiErrorResponse> productVersionConflict(
-            ProductVersionConflictException exception, HttpServletRequest request) {
-        return ApiErrors.entity(
-                HttpStatus.CONFLICT, "PRODUCT_VERSION_CONFLICT", exception.getMessage(), request);
-    }
-
     @ExceptionHandler(OptimisticLockingFailureException.class)
     ResponseEntity<ApiErrorResponse> optimisticLockingFailure(
             OptimisticLockingFailureException exception, HttpServletRequest request) {
@@ -225,24 +70,6 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             PessimisticLockingFailureException exception, HttpServletRequest request) {
         return ApiErrors.entity(
                 HttpStatus.CONFLICT, "INVENTORY_CONFLICT", CONCURRENT_MODIFICATION_MESSAGE, request);
-    }
-
-    @ExceptionHandler(InvalidProductCategoryException.class)
-    ResponseEntity<ApiErrorResponse> invalidProductCategory(
-            InvalidProductCategoryException exception, HttpServletRequest request) {
-        return ApiErrors.entity(
-                HttpStatus.BAD_REQUEST, "INVALID_PRODUCT_CATEGORY", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(InvalidProductQueryException.class)
-    ResponseEntity<ApiErrorResponse> invalidProductQuery(
-            InvalidProductQueryException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", exception.getMessage(), request);
-    }
-
-    @ExceptionHandler(InvalidSortException.class)
-    ResponseEntity<ApiErrorResponse> invalidSort(InvalidSortException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.BAD_REQUEST, "INVALID_SORT", exception.getMessage(), request);
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
@@ -265,7 +92,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     ResponseEntity<ApiErrorResponse> illegalArgument(
             IllegalArgumentException exception, HttpServletRequest request) {
-        return ApiErrors.entity(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", exception.getMessage(), request);
+        log.debug(
+                "event=invalid_request path={} correlationId={} message={}",
+                request.getRequestURI(),
+                CorrelationIds.currentOrEmpty(),
+                exception.getMessage());
+        return ApiErrors.entity(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", GENERIC_INVALID_REQUEST, request);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
@@ -327,6 +159,23 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 "INTERNAL_ERROR",
                 "An unexpected error occurred",
                 request);
+    }
+
+    private static void logDomainFailure(DomainApiException exception, HttpServletRequest request) {
+        switch (exception.errorCode()) {
+            case "INSUFFICIENT_STOCK", "INVENTORY_CONFLICT", "INACTIVE_PRODUCT" -> log.warn(
+                    "event=checkout_or_cart_conflict code={} path={} message={}",
+                    exception.errorCode(),
+                    request.getRequestURI(),
+                    exception.getMessage());
+            case "EMPTY_CART" -> log.warn(
+                    "event=checkout_failed code=EMPTY_CART path={}", request.getRequestURI());
+            case "IDEMPOTENCY_KEY_REUSED" -> log.warn(
+                    "event=checkout_failed code=IDEMPOTENCY_KEY_REUSED path={}", request.getRequestURI());
+            default -> {
+                // Most domain failures are expected client errors; no server log noise.
+            }
+        }
     }
 
     @Override

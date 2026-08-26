@@ -8,7 +8,7 @@ import com.example.ecommerce.cart.mapper.CartMapper;
 import com.example.ecommerce.cart.repository.CartRepository;
 import com.example.ecommerce.common.persistence.PersistenceConventions;
 import com.example.ecommerce.common.security.CurrentUserProvider;
-import com.example.ecommerce.inventory.service.InsufficientStockException;
+import com.example.ecommerce.inventory.service.InventoryService;
 import com.example.ecommerce.product.entity.Product;
 import com.example.ecommerce.product.repository.ProductRepository;
 import com.example.ecommerce.product.service.ProductNotFoundException;
@@ -31,11 +31,12 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 @Transactional
-public class CartService {
+public class CartService implements CartCheckoutPort {
 
     private final CartRepository cartRepository;
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
+    private final InventoryService inventoryService;
     private final CurrentUserProvider currentUserProvider;
     private final CartMapper cartMapper;
 
@@ -43,11 +44,13 @@ public class CartService {
             CartRepository cartRepository,
             ProductRepository productRepository,
             UserRepository userRepository,
+            InventoryService inventoryService,
             CurrentUserProvider currentUserProvider,
             CartMapper cartMapper) {
         this.cartRepository = cartRepository;
         this.productRepository = productRepository;
         this.userRepository = userRepository;
+        this.inventoryService = inventoryService;
         this.currentUserProvider = currentUserProvider;
         this.cartMapper = cartMapper;
     }
@@ -58,6 +61,24 @@ public class CartService {
         return cartRepository.findWithItemsByUserId(userId)
                 .map(cartMapper::toResponse)
                 .orElseGet(CartService::emptyCartResponse);
+    }
+
+    @Override
+    public Cart requireNonEmptyCartForCheckout(long userId) {
+        Cart cart = cartRepository.findWithItemsByUserIdForUpdate(userId)
+                .orElseThrow(EmptyCartException::new);
+        if (cart.isEmpty()) {
+            throw new EmptyCartException();
+        }
+        return cart;
+    }
+
+    @Override
+    public void clearAfterCheckout(long userId) {
+        Cart cart = cartRepository.findWithItemsByUserIdForUpdate(userId)
+                .orElseThrow(EmptyCartException::new);
+        cart.clear();
+        cartRepository.save(cart);
     }
 
     public CartResponse addItem(AddCartItemCommand command) {
@@ -147,11 +168,8 @@ public class CartService {
         }
     }
 
-    private static void requireSufficientStock(Product product, int requestedQuantity) {
-        int available = product.getStockQuantity();
-        if (requestedQuantity > available) {
-            throw new InsufficientStockException(product.getId(), available, requestedQuantity);
-        }
+    private void requireSufficientStock(Product product, int requestedQuantity) {
+        inventoryService.validateAvailability(product.getId(), requestedQuantity);
     }
 
     private static void requirePositiveQuantity(int quantity) {

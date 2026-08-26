@@ -4,19 +4,21 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.example.ecommerce.auth.dto.AuthenticatedUser;
 import com.example.ecommerce.auth.service.JwtTokenService;
 import com.example.ecommerce.common.security.JwtClaims;
-import com.example.ecommerce.user.UserRole;
+import com.example.ecommerce.common.support.PersistedAuthUsers;
+import com.example.ecommerce.user.repository.UserRepository;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import javax.crypto.spec.SecretKeySpec;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
@@ -75,6 +77,19 @@ class JwtAuthenticationIntegrationTest {
 
     @Autowired
     private JwtEncoder jwtEncoder;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    private PersistedAuthUsers authUsers;
+
+    @BeforeEach
+    void setUpAuthUsers() {
+        authUsers = new PersistedAuthUsers(userRepository, passwordEncoder, jwtTokenService);
+    }
 
     @Test
     void rejectsARequestWithoutAToken() throws Exception {
@@ -141,20 +156,19 @@ class JwtAuthenticationIntegrationTest {
     }
 
     private String customerToken() {
-        return jwtTokenService.issue(new AuthenticatedUser(1L, "ada@example.com", UserRole.CUSTOMER))
-                .accessToken();
+        return authUsers.accessToken(authUsers.ensureCustomer());
     }
 
     private String adminToken() {
-        return jwtTokenService.issue(new AuthenticatedUser(2L, "root@example.com", UserRole.ADMIN))
-                .accessToken();
+        return authUsers.accessToken(authUsers.ensureAdmin());
     }
 
-    private static String sign(JwtEncoder encoder, String role, Instant issuedAt, Instant expiresAt) {
+    private String sign(JwtEncoder encoder, String role, Instant issuedAt, Instant expiresAt) {
+        String subject = String.valueOf(authUsers.ensureCustomer().getId());
         return encoder.encode(JwtEncoderParameters.from(
                         JwsHeader.with(MacAlgorithm.HS256).build(),
                         JwtClaimsSet.builder()
-                                .subject("1")
+                                .subject(subject)
                                 .claim(JwtClaims.EMAIL, "ada@example.com")
                                 .claim(JwtClaims.ROLE, role)
                                 .issuedAt(issuedAt)

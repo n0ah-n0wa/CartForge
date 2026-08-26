@@ -93,7 +93,8 @@ Chart: `helm/cartforge` (Chart.yaml `name: cartforge`).
 |---|---|
 | `replicaCount` | `2` |
 | `image.repository` | `ghcr.io/example/ecommerce-api` (override at deploy) |
-| `image.tag` | empty — CD/`--set` supplies full git SHA |
+| `image.tag` | empty in file — **required** at render (`--set image.tag=<sha>`); SNAPSHOT / Chart.AppVersion fallback removed |
+| `networkPolicy.enabled` | `true` — Ingress/monitoring peers only |
 | `ingress` | enabled, `className: nginx`, host/path placeholders |
 | `config.springProfilesActive` | `prod` |
 | `secrets.create` | `false` |
@@ -227,11 +228,15 @@ The chart expects an existing Secret (CD sets `secrets.create=false`):
 kubectl create secret generic cartforge-secrets \
   --namespace cartforge \
   --from-literal=POSTGRES_PASSWORD='...' \
-  --from-literal=JWT_SECRET='...'   # >= 32 characters, non-placeholder
+  --from-literal=JWT_SECRET='...' \
+  --from-literal=REDIS_URL='redis://:PASSWORD@redis.example.com:6379'
 ```
 
-Keys must match chart defaults (`POSTGRES_PASSWORD`, `JWT_SECRET`) unless you
-override `secrets.postgresPasswordKey` / `secrets.jwtSecretKey`.
+Keys must match chart defaults (`POSTGRES_PASSWORD`, `JWT_SECRET`, plus `REDIS_URL`)
+unless you override `secrets.postgresPasswordKey` / `secrets.jwtSecretKey`.
+
+Production Ingress must include `ingress.tls` (TLS secret + hosts); the chart fails
+render under the `prod` profile when TLS or NetworkPolicy is missing.
 
 ### Image pull (private GHCR packages)
 

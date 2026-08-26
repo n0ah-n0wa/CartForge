@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.example.ecommerce.auth.dto.AuthenticatedUser;
 import com.example.ecommerce.auth.service.JwtTokenService;
+import com.example.ecommerce.user.UserRole;
 import com.example.ecommerce.user.entity.User;
 import com.example.ecommerce.user.repository.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,8 +31,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * HTTP contracts for register/login, including anti-enumeration and the fact
- * that disabling an account does not revoke already-issued JWTs.
+ * HTTP contracts for register/login, including anti-enumeration and that
+ * disabling an account rejects both new logins and existing Bearer tokens.
  */
 @SpringBootTest(
         properties = {
@@ -159,7 +160,7 @@ class AuthControllerApiIntegrationTest {
     }
 
     @Test
-    void disablingAnAccountBlocksLoginButDoesNotRevokeExistingTokens() throws Exception {
+    void disablingAnAccountBlocksLoginAndRevokesExistingBearerAccess() throws Exception {
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(APPLICATION_JSON)
                         .content(registerBody("keep-token@example.com")))
@@ -180,6 +181,35 @@ class AuthControllerApiIntegrationTest {
                 .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
 
         mockMvc.perform(get("/api/v1/cart").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void demotingAnAdminRevokesAdminAccessBeforeTokenExpiry() throws Exception {
+        User admin = User.create(
+                "demoted-admin@example.com",
+                passwordEncoder.encode(PASSWORD),
+                "Root",
+                "Admin",
+                UserRole.ADMIN);
+        userRepository.saveAndFlush(admin);
+
+        String adminToken = jwtTokenService
+                .issue(new AuthenticatedUser(admin.getId(), admin.getEmail(), UserRole.ADMIN))
+                .accessToken();
+
+        mockMvc.perform(get("/api/v1/admin/orders")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andExpect(status().isOk());
+
+        admin.assignRole(UserRole.CUSTOMER);
+        userRepository.saveAndFlush(admin);
+
+        mockMvc.perform(get("/api/v1/admin/orders")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/v1/cart").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
                 .andExpect(status().isOk());
     }
 

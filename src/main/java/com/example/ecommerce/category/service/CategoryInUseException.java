@@ -1,17 +1,11 @@
 package com.example.ecommerce.category.service;
 
-public class CategoryInUseException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
-
-    private final Long categoryId;
+public class CategoryInUseException extends DomainApiException {
 
     public CategoryInUseException(Long categoryId) {
-        super("Category " + categoryId + " has products; deactivate or reassign before delete");
-        this.categoryId = categoryId;
-    }
-
-    public Long getCategoryId() {
-        return categoryId;
+        super("CATEGORY_IN_USE", HttpStatus.CONFLICT, "Category " + categoryId + " has products; deactivate or reassign before delete");
     }
 }

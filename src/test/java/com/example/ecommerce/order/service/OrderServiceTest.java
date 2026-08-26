@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -12,7 +14,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.example.ecommerce.cart.entity.Cart;
-import com.example.ecommerce.cart.repository.CartRepository;
+import com.example.ecommerce.cart.service.CartCheckoutPort;
+import com.example.ecommerce.cart.service.EmptyCartException;
 import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.common.config.ApplicationProperties;
 import com.example.ecommerce.common.pagination.InvalidSortException;
@@ -67,7 +70,7 @@ class OrderServiceTest {
     private UserRepository userRepository;
 
     @Mock
-    private CartRepository cartRepository;
+    private CartCheckoutPort cartCheckoutPort;
 
     @Mock
     private OrderRepository orderRepository;
@@ -95,7 +98,7 @@ class OrderServiceTest {
         orderService = new OrderService(
                 currentUserProvider,
                 userRepository,
-                cartRepository,
+                cartCheckoutPort,
                 orderRepository,
                 checkoutIdempotencyKeyRepository,
                 inventoryService,
@@ -113,8 +116,9 @@ class OrderServiceTest {
 
         when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
-        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
+        when(cartCheckoutPort.requireNonEmptyCartForCheckout(USER_ID)).thenReturn(cart);
         when(orderNumberGenerator.nextOrderNumber()).thenReturn("ORD-2026-000001");
+        when(inventoryService.lockForCheckout(PRODUCT_ID)).thenReturn(keyboard);
         when(inventoryService.decreaseStock(PRODUCT_ID, 2))
                 .thenReturn(new StockLevel(PRODUCT_ID, 8, 1L));
         when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> {
@@ -122,7 +126,10 @@ class OrderServiceTest {
             ReflectionTestUtils.setField(order, "id", 100L);
             return order;
         });
-        when(cartRepository.save(cart)).thenReturn(cart);
+        doAnswer(invocation -> {
+            cart.clear();
+            return null;
+        }).when(cartCheckoutPort).clearAfterCheckout(USER_ID);
 
         OrderResponse response = orderService.checkout(CHECKOUT);
 
@@ -142,8 +149,9 @@ class OrderServiceTest {
 
         assertThat(cart.isEmpty()).isTrue();
         verify(inventoryService).validateAvailability(PRODUCT_ID, 2);
+        verify(inventoryService).lockForCheckout(PRODUCT_ID);
         verify(inventoryService).decreaseStock(PRODUCT_ID, 2);
-        verify(cartRepository).save(cart);
+        verify(cartCheckoutPort).clearAfterCheckout(USER_ID);
 
         ArgumentCaptor<Order> orderCaptor = ArgumentCaptor.forClass(Order.class);
         verify(orderRepository).saveAndFlush(orderCaptor.capture());
@@ -162,8 +170,10 @@ class OrderServiceTest {
 
         when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
-        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
+        when(cartCheckoutPort.requireNonEmptyCartForCheckout(USER_ID)).thenReturn(cart);
         when(orderNumberGenerator.nextOrderNumber()).thenReturn("ORD-2026-000002");
+        when(inventoryService.lockForCheckout(PRODUCT_ID)).thenReturn(keyboard);
+        when(inventoryService.lockForCheckout(99L)).thenReturn(mouse);
         when(inventoryService.decreaseStock(PRODUCT_ID, 2)).thenReturn(new StockLevel(PRODUCT_ID, 8, 1L));
         when(inventoryService.decreaseStock(99L, 1)).thenReturn(new StockLevel(99L, 4, 1L));
         when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> {
@@ -171,7 +181,10 @@ class OrderServiceTest {
             ReflectionTestUtils.setField(order, "id", 101L);
             return order;
         });
-        when(cartRepository.save(cart)).thenReturn(cart);
+        doAnswer(invocation -> {
+            cart.clear();
+            return null;
+        }).when(cartCheckoutPort).clearAfterCheckout(USER_ID);
 
         OrderResponse response = orderService.checkout(CHECKOUT);
 
@@ -179,14 +192,14 @@ class OrderServiceTest {
         assertThat(cart.isEmpty()).isTrue();
         verify(inventoryService).decreaseStock(PRODUCT_ID, 2);
         verify(inventoryService).decreaseStock(99L, 1);
-        verify(cartRepository).save(cart);
+        verify(cartCheckoutPort).clearAfterCheckout(USER_ID);
     }
 
     @Test
     void checkoutRejectsWhenCustomerHasNoCart() {
         when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user(USER_ID)));
-        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.empty());
+        when(cartCheckoutPort.requireNonEmptyCartForCheckout(USER_ID)).thenThrow(new EmptyCartException());
 
         assertThatThrownBy(() -> orderService.checkout(CHECKOUT))
                 .isInstanceOf(EmptyCartException.class);
@@ -198,10 +211,9 @@ class OrderServiceTest {
     @Test
     void checkoutRejectsEmptyCart() {
         User customer = user(USER_ID);
-        Cart empty = Cart.forUser(customer);
         when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
-        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(empty));
+        when(cartCheckoutPort.requireNonEmptyCartForCheckout(USER_ID)).thenThrow(new EmptyCartException());
 
         assertThatThrownBy(() -> orderService.checkout(CHECKOUT))
                 .isInstanceOf(EmptyCartException.class);
@@ -219,7 +231,7 @@ class OrderServiceTest {
 
         when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
-        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
+        when(cartCheckoutPort.requireNonEmptyCartForCheckout(USER_ID)).thenReturn(cart);
 
         assertThatThrownBy(() -> orderService.checkout(CHECKOUT))
                 .isInstanceOf(InactiveProductForCheckoutException.class)
@@ -229,7 +241,7 @@ class OrderServiceTest {
         verify(inventoryService, never()).validateAvailability(anyLong(), anyInt());
         verify(inventoryService, never()).decreaseStock(anyLong(), anyInt());
         verify(orderRepository, never()).saveAndFlush(any());
-        verify(cartRepository, never()).save(any());
+        verify(cartCheckoutPort, never()).clearAfterCheckout(anyLong());
         assertThat(cart.isEmpty()).isFalse();
     }
 
@@ -242,7 +254,7 @@ class OrderServiceTest {
 
         when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
-        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
+        when(cartCheckoutPort.requireNonEmptyCartForCheckout(USER_ID)).thenReturn(cart);
         doThrow(new InsufficientStockException(PRODUCT_ID, 1, 2))
                 .when(inventoryService)
                 .validateAvailability(PRODUCT_ID, 2);
@@ -252,7 +264,7 @@ class OrderServiceTest {
 
         verify(inventoryService, never()).decreaseStock(anyLong(), anyInt());
         verify(orderRepository, never()).saveAndFlush(any());
-        verify(cartRepository, never()).save(any());
+        verify(cartCheckoutPort, never()).clearAfterCheckout(anyLong());
         assertThat(cart.isEmpty()).isFalse();
     }
 
@@ -265,8 +277,9 @@ class OrderServiceTest {
 
         when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
-        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
+        when(cartCheckoutPort.requireNonEmptyCartForCheckout(USER_ID)).thenReturn(cart);
         when(orderNumberGenerator.nextOrderNumber()).thenReturn("ORD-2026-000002");
+        when(inventoryService.lockForCheckout(PRODUCT_ID)).thenReturn(keyboard);
         when(inventoryService.decreaseStock(eq(PRODUCT_ID), eq(1)))
                 .thenThrow(new InventoryConflictException(PRODUCT_ID));
 
@@ -274,7 +287,7 @@ class OrderServiceTest {
                 .isInstanceOf(InventoryConflictException.class);
 
         verify(orderRepository, never()).saveAndFlush(any());
-        verify(cartRepository, never()).save(any());
+        verify(cartCheckoutPort, never()).clearAfterCheckout(anyLong());
     }
 
     @Test
@@ -285,7 +298,7 @@ class OrderServiceTest {
         assertThatThrownBy(() -> orderService.checkout(CHECKOUT))
                 .isInstanceOf(OrderOwnerNotFoundException.class);
 
-        verify(cartRepository, never()).findWithItemsByUserIdForUpdate(anyLong());
+        verify(cartCheckoutPort, never()).requireNonEmptyCartForCheckout(anyLong());
         verify(orderRepository, never()).saveAndFlush(any());
     }
 
@@ -298,13 +311,12 @@ class OrderServiceTest {
 
         when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
-        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
+        when(cartCheckoutPort.requireNonEmptyCartForCheckout(USER_ID)).thenReturn(cart);
         when(orderNumberGenerator.nextOrderNumber()).thenReturn("ORD-2026-000003");
+        when(inventoryService.lockForCheckout(PRODUCT_ID)).thenReturn(keyboard);
         when(inventoryService.decreaseStock(PRODUCT_ID, 1))
                 .thenReturn(new StockLevel(PRODUCT_ID, 9, 1L));
         when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(cartRepository.save(cart)).thenReturn(cart);
-
         OrderResponse response = orderService.checkout(CHECKOUT);
 
         keyboard.rename("Keyboard Pro", "keyboard-pro");
@@ -316,6 +328,29 @@ class OrderServiceTest {
     }
 
     @Test
+    void checkoutSnapshotsFromTheLockedProductNotAStaleCartCopy() {
+        User customer = user(USER_ID);
+        Product cartCopy = product(PRODUCT_ID, "KB-001", "Keyboard", "keyboard", "49.50", 10, true);
+        Product locked = product(PRODUCT_ID, "KB-001", "Keyboard", "keyboard", "99.00", 10, true);
+        Cart cart = Cart.forUser(customer);
+        cart.addOrIncrease(cartCopy, 1);
+
+        when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
+        when(cartCheckoutPort.requireNonEmptyCartForCheckout(USER_ID)).thenReturn(cart);
+        when(orderNumberGenerator.nextOrderNumber()).thenReturn("ORD-2026-000003B");
+        when(inventoryService.lockForCheckout(PRODUCT_ID)).thenReturn(locked);
+        when(inventoryService.decreaseStock(PRODUCT_ID, 1))
+                .thenReturn(new StockLevel(PRODUCT_ID, 9, 2L));
+        when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        OrderResponse response = orderService.checkout(CHECKOUT);
+
+        assertThat(response.items().getFirst().unitPrice()).isEqualByComparingTo("99.00");
+        assertThat(response.totalAmount()).isEqualByComparingTo("99.00");
+        verify(inventoryService).lockForCheckout(PRODUCT_ID);
+    }
+
+    @Test
     void checkoutWithoutIdempotencyKeyDoesNotTouchIdempotencyRecords() {
         User customer = user(USER_ID);
         Product keyboard = product(PRODUCT_ID, "KB-001", "Keyboard", "keyboard", "49.50", 10, true);
@@ -324,8 +359,9 @@ class OrderServiceTest {
 
         when(currentUserProvider.requireUserId()).thenReturn(USER_ID);
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
-        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
+        when(cartCheckoutPort.requireNonEmptyCartForCheckout(USER_ID)).thenReturn(cart);
         when(orderNumberGenerator.nextOrderNumber()).thenReturn("ORD-2026-000004");
+        when(inventoryService.lockForCheckout(PRODUCT_ID)).thenReturn(keyboard);
         when(inventoryService.decreaseStock(PRODUCT_ID, 1))
                 .thenReturn(new StockLevel(PRODUCT_ID, 9, 1L));
         when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> {
@@ -333,8 +369,6 @@ class OrderServiceTest {
             ReflectionTestUtils.setField(order, "id", 104L);
             return order;
         });
-        when(cartRepository.save(cart)).thenReturn(cart);
-
         orderService.checkout(CHECKOUT, null);
 
         verify(checkoutIdempotencyKeyRepository, never()).lockByUserIdAndKey(anyLong(), any());
@@ -365,7 +399,7 @@ class OrderServiceTest {
         verify(checkoutIdempotencyKeyRepository).lockByUserIdAndKey(USER_ID, "key-1");
         verify(inventoryService, never()).decreaseStock(anyLong(), anyInt());
         verify(orderRepository, never()).saveAndFlush(any());
-        verify(cartRepository, never()).findWithItemsByUserIdForUpdate(anyLong());
+        verify(cartCheckoutPort, never()).requireNonEmptyCartForCheckout(anyLong());
     }
 
     @Test
@@ -401,8 +435,9 @@ class OrderServiceTest {
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(customer));
         when(checkoutIdempotencyKeyRepository.findByUserIdAndIdempotencyKey(USER_ID, "key-1"))
                 .thenReturn(Optional.empty());
-        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.of(cart));
+        when(cartCheckoutPort.requireNonEmptyCartForCheckout(USER_ID)).thenReturn(cart);
         when(orderNumberGenerator.nextOrderNumber()).thenReturn("ORD-2026-000007");
+        when(inventoryService.lockForCheckout(PRODUCT_ID)).thenReturn(keyboard);
         when(inventoryService.decreaseStock(PRODUCT_ID, 1))
                 .thenReturn(new StockLevel(PRODUCT_ID, 9, 1L));
         when(orderRepository.saveAndFlush(any(Order.class))).thenAnswer(invocation -> {
@@ -410,7 +445,6 @@ class OrderServiceTest {
             ReflectionTestUtils.setField(order, "id", 107L);
             return order;
         });
-        when(cartRepository.save(cart)).thenReturn(cart);
         when(checkoutIdempotencyKeyRepository.saveAndFlush(any(CheckoutIdempotencyKey.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -431,7 +465,7 @@ class OrderServiceTest {
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user(USER_ID)));
         when(checkoutIdempotencyKeyRepository.findByUserIdAndIdempotencyKey(USER_ID, "key-1"))
                 .thenReturn(Optional.empty());
-        when(cartRepository.findWithItemsByUserIdForUpdate(USER_ID)).thenReturn(Optional.empty());
+        when(cartCheckoutPort.requireNonEmptyCartForCheckout(USER_ID)).thenThrow(new EmptyCartException());
 
         assertThatThrownBy(() -> orderService.checkout(CHECKOUT, "key-1"))
                 .isInstanceOf(EmptyCartException.class);
@@ -450,7 +484,7 @@ class OrderServiceTest {
                 .isInstanceOf(InvalidIdempotencyKeyException.class);
 
         verify(checkoutIdempotencyKeyRepository, never()).lockByUserIdAndKey(anyLong(), any());
-        verify(cartRepository, never()).findWithItemsByUserIdForUpdate(anyLong());
+        verify(cartCheckoutPort, never()).requireNonEmptyCartForCheckout(anyLong());
     }
 
     @Test

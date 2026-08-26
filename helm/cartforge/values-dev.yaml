@@ -1,4 +1,10 @@
 # Local / demo cluster. Demo in-cluster stores are not production-managed services.
+#
+# Secrets are not committed. Lint/render with:
+#   helm template cartforge ./helm/cartforge -f helm/cartforge/values-dev.yaml \
+#     --set-string secrets.postgresPassword='…' \
+#     --set-string secrets.jwtSecret='…' \   # ≥ 32 chars
+#     --set-string secrets.redisPassword='…'
 
 replicaCount: 2
 
@@ -17,7 +23,7 @@ ingress:
           pathType: Prefix
 
 config:
-  springProfilesActive: prod
+  springProfilesActive: dev
   loggingLevelRoot: DEBUG
   corsOrigins: http://cartforge.local
 
@@ -27,9 +33,17 @@ waitForDependencies:
 secrets:
   create: true
   existingSecret: ""
-  # Demo placeholders only. Override locally; do not use in a real environment.
-  postgresPassword: local-k8s-demo-postgres-password
-  jwtSecret: local-k8s-demo-jwt-secret-32chars-min!!
+  postgresPassword: ""
+  jwtSecret: ""
+  redisPassword: ""
+
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+    - podSelector: {}
 
 demoInfrastructure:
   postgres:

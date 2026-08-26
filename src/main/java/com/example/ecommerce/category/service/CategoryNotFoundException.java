@@ -1,17 +1,11 @@
 package com.example.ecommerce.category.service;
 
-public class CategoryNotFoundException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+public class CategoryNotFoundException extends DomainApiException {
 
-    private final Long categoryId;
-
-    public CategoryNotFoundException(Long categoryId) {
-        super("Category not found: " + categoryId);
-        this.categoryId = categoryId;
-    }
-
-    public Long getCategoryId() {
-        return categoryId;
+    public CategoryNotFoundException(Long id) {
+        super("CATEGORY_NOT_FOUND", HttpStatus.NOT_FOUND, "Category not found: " + id);
     }
 }

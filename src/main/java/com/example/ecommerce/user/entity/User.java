@@ -4,6 +4,7 @@ import com.example.ecommerce.common.persistence.VersionedEntity;
 import com.example.ecommerce.user.UserRole;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListeners;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
@@ -12,6 +13,7 @@ import java.util.Objects;
 
 @Entity
 @Table(name = "users")
+@EntityListeners(UserSecurityCacheListener.class)
 public class User extends VersionedEntity {
 
     @Column(nullable = false, length = 320)
@@ -75,6 +77,14 @@ public class User extends VersionedEntity {
 
     public void disable() {
         this.enabled = false;
+    }
+
+    /**
+     * Changes the persisted role. Authorization reads this value on every Bearer
+     * request, so demotion takes effect before the current JWT expires.
+     */
+    public void assignRole(UserRole role) {
+        this.role = Objects.requireNonNull(role, "role");
     }
 
     public String getEmail() {

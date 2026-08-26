@@ -61,11 +61,8 @@ jobs:
       - name: Compile
         run: ./mvnw -B -DskipTests compile
 
-      - name: Unit and integration tests
-        run: ./mvnw -B test
-
-      - name: Static analysis and package
-        run: ./mvnw -B verify -DskipTests
+      - name: Verify (tests, static analysis, package)
+        run: ./mvnw -B verify
 
       - name: Upload application JAR
         uses: actions/upload-artifact@v4
@@ -130,18 +127,57 @@ jobs:
       - name: Helm lint
         run: |
           set -euo pipefail
-          helm lint helm/cartforge -f helm/cartforge/values-dev.yaml
-          helm lint helm/cartforge -f helm/cartforge/values-prod.yaml
+          helm lint helm/cartforge -f helm/cartforge/values-dev.yaml \
+            --set-string secrets.postgresPassword='ci-dev-only-postgres-password' \
+            --set-string secrets.jwtSecret='ci-dev-only-jwt-secret-32chars-minimum!!' \
+            --set-string secrets.redisPassword='ci-dev-only-redis-password'
+          # values-prod.yaml leaves image.tag empty on purpose; lint still needs a
+          # non-SNAPSHOT tag so the chart's required() guard can be evaluated.
+          helm lint helm/cartforge -f helm/cartforge/values-prod.yaml \
+            --set image.tag="${{ github.sha }}"
 
       - name: Helm template validation
         run: |
           set -euo pipefail
-          helm template cartforge helm/cartforge -f helm/cartforge/values-dev.yaml > /tmp/cartforge-dev.yaml
+          helm template cartforge helm/cartforge -f helm/cartforge/values-dev.yaml \
+            --set-string secrets.postgresPassword='ci-dev-only-postgres-password' \
+            --set-string secrets.jwtSecret='ci-dev-only-jwt-secret-32chars-minimum!!' \
+            --set-string secrets.redisPassword='ci-dev-only-redis-password' \
+            > /tmp/cartforge-dev.yaml
           helm template cartforge helm/cartforge -f helm/cartforge/values-prod.yaml \
             --set image.tag="${{ github.sha }}" > /tmp/cartforge-prod.yaml
 
+          # Empty / SNAPSHOT prod tags must fail render (no Chart.AppVersion fallback).
+          if helm template cartforge helm/cartforge -f helm/cartforge/values-prod.yaml \
+              > /tmp/cartforge-prod-empty-tag.yaml 2>/tmp/cartforge-prod-empty-tag.err; then
+            echo "Expected helm template with empty image.tag to fail" >&2
+            exit 1
+          fi
+          grep -qi 'image.tag' /tmp/cartforge-prod-empty-tag.err
+
+          # Prod without TLS or NetworkPolicy must fail.
+          if helm template cartforge helm/cartforge -f helm/cartforge/values-prod.yaml \
+              --set image.tag="${{ github.sha }}" --set-json 'ingress.tls=[]' \
+              > /tmp/cartforge-prod-no-tls.yaml 2>/tmp/cartforge-prod-no-tls.err; then
+            echo "Expected helm template without ingress.tls to fail under prod" >&2
+            exit 1
+          fi
+          grep -qi 'ingress.tls' /tmp/cartforge-prod-no-tls.err
+
+          if helm template cartforge helm/cartforge -f helm/cartforge/values-prod.yaml \
+              --set image.tag="${{ github.sha }}" --set networkPolicy.enabled=false \
+              > /tmp/cartforge-prod-no-np.yaml 2>/tmp/cartforge-prod-no-np.err; then
+            echo "Expected helm template without networkPolicy to fail under prod" >&2
+            exit 1
+          fi
+          grep -qi 'networkPolicy' /tmp/cartforge-prod-no-np.err
+
           test -s /tmp/cartforge-dev.yaml
           test -s /tmp/cartforge-prod.yaml
+          grep -q "image: .*:${{ github.sha }}" /tmp/cartforge-prod.yaml
+          grep -q 'kind: NetworkPolicy' /tmp/cartforge-prod.yaml
+          grep -q 'secretName: cartforge-api-tls' /tmp/cartforge-prod.yaml
+          grep -q 'requirepass' /tmp/cartforge-dev.yaml
 
           sudo apt-get update
           sudo apt-get install -y python3-yaml

@@ -55,7 +55,7 @@ Package layout (feature-oriented):
 ```text
 src/main/java/com/example/ecommerce/
 ├── auth/          # register, login, JWT
-├── user/          # user persistence and DTOs (no public profile controller yet)
+├── user/          # profile API (`GET /api/v1/users/me`) and persistence
 ├── category/
 ├── product/
 ├── cart/
@@ -76,7 +76,7 @@ Details: [docs/architecture.md](docs/architecture.md). Decisions: [docs/adr/](do
 | Web | Spring MVC |
 | Persistence | Spring Data JPA, Hibernate (`ddl-auto=validate`) |
 | Database | PostgreSQL 16 |
-| Migrations | Flyway (`V1`–`V10`) |
+| Migrations | Flyway (`V1`–`V11`) |
 | Security | Spring Security OAuth2 resource server (JWT HS256) |
 | Passwords | Delegating `PasswordEncoder` (BCrypt by default) |
 | Validation | Jakarta Bean Validation |
@@ -98,17 +98,20 @@ Implemented today:
 - Product search (`category`, `minPrice`/`maxPrice`, `search`, allowlisted `sort`, pagination)
 - Customer cart CRUD
 - Transactional checkout with order-line snapshots, stock decrement, cart clear
-- Checkout `Idempotency-Key` (PostgreSQL-backed)
+- Checkout `Idempotency-Key` header (optional but recommended for safe retries; PostgreSQL-backed when supplied)
 - Order history, customer cancel (`PENDING`/`CONFIRMED`), admin status updates
 - Optimistic locking on concurrent inventory updates
 - Redis cache for catalog reads; graceful degradation when Redis is down
 - Auth rate limiting on login/register
 - Centralized JSON errors, correlation IDs, Actuator health/liveness/readiness, Prometheus scrape endpoint
 
+Also included:
+
+- `GET /api/v1/users/me` authenticated profile
+- Optional deterministic **dev seed** (`app.seed.enabled`, never on `prod`)
+
 Not implemented:
 
-- Dedicated user-profile HTTP API
-- Automatic development seed data / demo users
 - Real payment, shipping, or notification integrations
 
 ## Prerequisites
@@ -124,14 +127,21 @@ Not implemented:
 git clone <repository-url>
 cd CartForge
 cp .env.example .env
-# Edit .env: set POSTGRES_PASSWORD and JWT_SECRET (JWT_SECRET ≥ 32 characters)
-./mvnw package -DskipTests
+# Edit .env: set POSTGRES_PASSWORD, REDIS_PASSWORD, and JWT_SECRET (JWT_SECRET ≥ 32 characters)
 docker compose up --build
 ```
 
+Compose builds with `docker/Dockerfile.ci` by default (no host `mvn package` required).  
 API: `http://localhost:8080`  
 Swagger UI (`dev` profile): `http://localhost:8080/swagger-ui.html`  
 OpenAPI JSON: `http://localhost:8080/v3/api-docs`
+
+When seed is enabled (`dev` + `APP_SEED_ENABLED=true`):
+
+| Email | Password | Role |
+|---|---|---|
+| `admin@cartforge.local` | `CartForge-Dev-Only-1` | ADMIN |
+| `customer@cartforge.local` | `CartForge-Dev-Only-1` | CUSTOMER |
 
 Smoke check against a running stack:
 
@@ -484,7 +494,8 @@ Details: [docs/security.md](docs/security.md).
 |---|---|
 | App fails with password auth error to Postgres | Volume initialized with a different password → `docker compose down -v` then recreate, or align `.env` |
 | `JWT_SECRET` / placeholder rejected on startup | Use a real secret ≥ 32 characters; `prod` rejects `change-me` style values |
-| Compose build fails finding JAR | Run `./mvnw package -DskipTests` before `docker compose up --build` |
+| Compose build fails finding JAR | Default uses `docker/Dockerfile.ci`. If `DOCKERFILE=Dockerfile`, run `./mvnw package -DskipTests` first |
+| Redis AUTH errors in Compose | Set `REDIS_PASSWORD` in `.env` and match `REDIS_URL` (`redis://:password@redis:6379`) |
 | In-Docker Maven PKIX / TLS errors | Use host-built JAR + default `Dockerfile`, not `Dockerfile.ci` |
 | Tests fail without Docker | Testcontainers need a working Docker daemon |
 | Helm template fails with default values only | Supply `-f values-dev.yaml` or `-f values-prod.yaml` (and secrets/image as required) |
@@ -507,4 +518,4 @@ Details: [docs/security.md](docs/security.md).
 
 ## License / Credentials
 
-Do not commit real JWT secrets, database passwords, private keys, kubeconfigs, or production credentials. No development seed users are shipped automatically.
+Do not commit real JWT secrets, database passwords, private keys, kubeconfigs, or production credentials. Development seed users exist only when `dev` seed is enabled and must never run in production.

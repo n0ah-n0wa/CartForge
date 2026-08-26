@@ -389,4 +389,23 @@ class OrderRepositoryTest {
                 quantity,
                 lineTotal);
     }
+
+    @Test
+    void orderListIndexesCoverUserStatusAndCreatedAtSorts() {
+        List<String> indexes = jdbcTemplate.queryForList(
+                """
+                select indexname
+                from pg_indexes
+                where schemaname = current_schema()
+                  and tablename = 'orders'
+                order by indexname
+                """,
+                String.class);
+
+        assertThat(indexes)
+                .contains(
+                        "ix_orders_user_id_created_at_id",
+                        "ix_orders_status_created_at_id",
+                        "ix_orders_created_at_id");
+    }
 }

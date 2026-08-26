@@ -99,6 +99,15 @@ class ProdConfigurationTest {
                 .hasStackTraceContaining("development host");
     }
 
+    @Test
+    void prodProfileRejectsDatabaseUrlWithoutTls() {
+        Map<String, Object> environment = validProdEnvironment();
+        environment.put("DATABASE_URL", "jdbc:postgresql://prod-db.internal:5432/ecommerce");
+
+        assertThatThrownBy(() -> runProd(environment).close())
+                .hasStackTraceContaining("TLS");
+    }
+
     private static ConfigurableApplicationContext runProd(Map<String, Object> environment) {
         SpringApplication application = new SpringApplication(IsolatedProdApplication.class);
         application.setWebApplicationType(WebApplicationType.NONE);
@@ -114,7 +123,7 @@ class ProdConfigurationTest {
 
     private static Map<String, Object> validProdEnvironment() {
         Map<String, Object> environment = new HashMap<>();
-        environment.put("DATABASE_URL", "jdbc:postgresql://prod-db.internal:5432/ecommerce");
+        environment.put("DATABASE_URL", "jdbc:postgresql://prod-db.internal:5432/ecommerce?sslmode=require");
         environment.put("DATABASE_USERNAME", "ecommerce");
         environment.put("DATABASE_PASSWORD", "prod-database-password-value");
         environment.put("REDIS_URL", "redis://prod-redis.internal:6379");
@@ -125,9 +134,9 @@ class ProdConfigurationTest {
         return environment;
     }
 
-    @SpringBootApplication(scanBasePackages = "com.example.ecommerce.common")
+    @SpringBootApplication(scanBasePackages = "com.example.ecommerce.common.config")
     @EnableCaching
-    @EnableConfigurationProperties(ApplicationProperties.class)
+    @EnableConfigurationProperties({ApplicationProperties.class, SeedProperties.class})
     static class IsolatedProdApplication {
     }
 }

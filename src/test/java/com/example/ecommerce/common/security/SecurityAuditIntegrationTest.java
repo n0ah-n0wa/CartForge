@@ -37,6 +37,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
@@ -118,6 +119,7 @@ class SecurityAuditIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        SecurityContextHolder.clearContext();
         orderItemRepository.deleteAll();
         orderRepository.deleteAll();
         cartRepository.deleteAll();
@@ -265,20 +267,23 @@ class SecurityAuditIntegrationTest {
                 .accessToken();
         String[] parts = valid.split("\\.");
         String truncated = parts[0] + "." + parts[1];
-        String bitFlipped = parts[0] + "." + parts[1] + "." + flipLastCharacter(parts[2]);
+        // Flip a middle signature character (not the last) so Base64 padding quirks cannot
+        // accidentally leave a still-verifiable MAC.
+        String bitFlipped = parts[0] + "." + parts[1] + "." + flipCharacter(parts[2], parts[2].length() / 2);
         String replacedSignature = parts[0] + "." + parts[1] + "." + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
         String garbage = "not.a.jwt";
 
         assertThat(bitFlipped).isNotEqualTo(valid);
 
         for (String token : new String[] {truncated, bitFlipped, replacedSignature, garbage, "a.b.c"}) {
+            SecurityContextHolder.clearContext();
             MvcResult result = mockMvc.perform(get("/api/v1/orders")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                     .andExpect(status().isUnauthorized())
                     .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
                     .andReturn();
             String body = result.getResponse().getContentAsString();
-            assertThat(body).doesNotContain(token);
+            assertThat(body).as("body for token %s", token).doesNotContain(token);
             assertThat(body).doesNotContain(valid);
             assertThat(body).doesNotContain("stackTrace");
         }
@@ -390,9 +395,9 @@ class SecurityAuditIntegrationTest {
                 .getTokenValue();
     }
 
-    private static String flipLastCharacter(String signature) {
-        char last = signature.charAt(signature.length() - 1);
-        char flipped = last == 'A' ? 'B' : 'A';
-        return signature.substring(0, signature.length() - 1) + flipped;
+    private static String flipCharacter(String value, int index) {
+        char current = value.charAt(index);
+        char flipped = current == 'A' ? 'B' : 'A';
+        return value.substring(0, index) + flipped + value.substring(index + 1);
     }
 }

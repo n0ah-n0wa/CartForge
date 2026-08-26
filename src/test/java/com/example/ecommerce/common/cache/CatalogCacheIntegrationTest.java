@@ -8,6 +8,7 @@ import com.example.ecommerce.category.entity.Category;
 import com.example.ecommerce.category.repository.CategoryRepository;
 import com.example.ecommerce.category.service.CategoryService;
 import com.example.ecommerce.common.persistence.CurrencyCode;
+import com.example.ecommerce.inventory.service.InventoryService;
 import com.example.ecommerce.product.dto.CreateProductCommand;
 import com.example.ecommerce.product.dto.PatchProductCommand;
 import com.example.ecommerce.product.dto.ProductResponse;
@@ -62,6 +63,9 @@ class CatalogCacheIntegrationTest {
 
     @Autowired
     private CategoryService categoryService;
+
+    @Autowired
+    private InventoryService inventoryService;
 
     @Autowired
     private ProductRepository productRepository;
@@ -235,6 +239,27 @@ class CatalogCacheIntegrationTest {
         ProductResponse adminView = productService.getResponse(created.getId(), true);
         assertThat(adminView.active()).isFalse();
         assertThat(productCache().get(created.getId())).isNull();
+    }
+
+    @Test
+    void inventoryStockChangeEvictsProductCaches() {
+        Product created = productService.create(new CreateProductCommand(
+                "KB-600",
+                "Keyboard Stock",
+                "keyboard-stock",
+                null,
+                new BigDecimal("25.00"),
+                CurrencyCode.EUR,
+                10,
+                books.getId()));
+
+        assertThat(productService.getResponse(created.getId(), false).stockQuantity()).isEqualTo(10);
+        assertThat(productCache().get(created.getId())).isNotNull();
+
+        inventoryService.decreaseStock(created.getId(), 3);
+
+        assertThat(productCache().get(created.getId())).isNull();
+        assertThat(productService.getResponse(created.getId(), false).stockQuantity()).isEqualTo(7);
     }
 
     private void clearCatalogCaches() {

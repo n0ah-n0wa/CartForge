@@ -1,17 +1,11 @@
 package com.example.ecommerce.cart.service;
 
-public class InactiveProductForCartException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
-
-    private final Long productId;
+public class InactiveProductForCartException extends DomainApiException {
 
     public InactiveProductForCartException(Long productId) {
-        super("Inactive product cannot be added to the cart: " + productId);
-        this.productId = productId;
-    }
-
-    public Long getProductId() {
-        return productId;
+        super("INACTIVE_PRODUCT", HttpStatus.BAD_REQUEST, "Product " + productId + " is not active");
     }
 }

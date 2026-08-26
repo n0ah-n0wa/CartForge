@@ -1,14 +1,11 @@
 package com.example.ecommerce.common.pagination;
 
-/**
- * Raised when a client requests a sort field or direction that is not allowed.
- * Maps to HTTP 400 so callers can correct the query without probing the schema.
- */
-public class InvalidSortException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+public class InvalidSortException extends DomainApiException {
 
     public InvalidSortException(String message) {
-        super(message);
+        super("INVALID_SORT", HttpStatus.BAD_REQUEST, message);
     }
 }

@@ -1,7 +1,6 @@
 package com.example.ecommerce.product.repository;
 
 import com.example.ecommerce.product.entity.Product;
-import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -40,7 +39,12 @@ public interface ProductRepository
     @Query(value = "select stock_quantity from products where id = :id", nativeQuery = true)
     Optional<Integer> findStockQuantityById(@Param("id") Long id);
 
-    List<Product> findByCategoryId(Long categoryId);
+    /**
+     * Category reassignment pages through this finder so large categories are not
+     * loaded into memory in one shot. Callers must re-request page 0 after each
+     * batch because moved rows leave the source category.
+     */
+    Page<Product> findByCategoryId(Long categoryId, Pageable pageable);
 
     @EntityGraph(attributePaths = "category")
     Optional<Product> findWithCategoryById(Long id);

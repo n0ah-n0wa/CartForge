@@ -35,7 +35,7 @@ class RedisFixedWindowAuthRateLimiterTest {
                 new ApplicationProperties.Jwt("test-only-jwt-secret-not-for-production-use", 3_600_000L),
                 new ApplicationProperties.Cors(List.of("http://localhost")),
                 new ApplicationProperties.Pagination(20, 100),
-                new ApplicationProperties.RateLimit(new ApplicationProperties.RateLimit.Auth(true, 3, 60)));
+                new ApplicationProperties.RateLimit(new ApplicationProperties.RateLimit.Auth(true, 3, 60, List.of())));
         limiter = new RedisFixedWindowAuthRateLimiter(template, properties);
     }
 
@@ -66,7 +66,7 @@ class RedisFixedWindowAuthRateLimiterTest {
                 new ApplicationProperties.Jwt("test-only-jwt-secret-not-for-production-use", 3_600_000L),
                 new ApplicationProperties.Cors(List.of("http://localhost")),
                 new ApplicationProperties.Pagination(20, 100),
-                new ApplicationProperties.RateLimit(new ApplicationProperties.RateLimit.Auth(true, 2, 1)));
+                new ApplicationProperties.RateLimit(new ApplicationProperties.RateLimit.Auth(true, 2, 1, List.of())));
         LettuceConnectionFactory factory =
                 new LettuceConnectionFactory(REDIS.getHost(), REDIS.getMappedPort(6379));
         factory.afterPropertiesSet();

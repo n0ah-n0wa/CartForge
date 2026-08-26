@@ -1,21 +1,11 @@
 package com.example.ecommerce.order.service;
 
-/**
- * Raised when the authenticated principal has no matching user row.
- * Maps to HTTP 401 ({@code ORDER_OWNER_NOT_FOUND}).
- */
-public class OrderOwnerNotFoundException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+public class OrderOwnerNotFoundException extends DomainApiException {
 
-    private final Long userId;
-
-    public OrderOwnerNotFoundException(Long userId) {
-        super("Authenticated order owner was not found: " + userId);
-        this.userId = userId;
-    }
-
-    public Long getUserId() {
-        return userId;
+    public OrderOwnerNotFoundException(long userId) {
+        super("ORDER_OWNER_NOT_FOUND", HttpStatus.UNAUTHORIZED, "Order owner " + userId + " was not found");
     }
 }

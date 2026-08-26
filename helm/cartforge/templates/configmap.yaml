@@ -10,7 +10,6 @@ data:
   LOGGING_LEVEL_ROOT: {{ .Values.config.loggingLevelRoot | quote }}
   DATABASE_URL: {{ include "cartforge.databaseUrl" . | quote }}
   DATABASE_USERNAME: {{ .Values.database.username | quote }}
-  REDIS_URL: {{ include "cartforge.redisUrl" . | quote }}
   JWT_EXPIRATION: {{ .Values.config.jwtExpiration | quote }}
   CORS_ORIGINS: {{ .Values.config.corsOrigins | quote }}
   APP_PAGINATION_DEFAULT_PAGE_SIZE: {{ .Values.config.pagination.defaultPageSize | quote }}

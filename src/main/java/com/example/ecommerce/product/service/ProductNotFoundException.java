@@ -1,17 +1,11 @@
 package com.example.ecommerce.product.service;
 
-public class ProductNotFoundException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
-
-    private final Long productId;
+public class ProductNotFoundException extends DomainApiException {
 
     public ProductNotFoundException(Long productId) {
-        super("Product not found: " + productId);
-        this.productId = productId;
-    }
-
-    public Long getProductId() {
-        return productId;
+        super("PRODUCT_NOT_FOUND", HttpStatus.NOT_FOUND, "Product not found: " + productId);
     }
 }

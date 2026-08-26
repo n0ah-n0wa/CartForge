@@ -9,11 +9,12 @@ Shared Java types live in `com.example.ecommerce.common.persistence`. Entities f
 | Topic | Implementation |
 |---|---|
 | Engine | PostgreSQL |
-| Migrations | Flyway `V1`–`V10` under `src/main/resources/db/migration` |
+| Migrations | Flyway `V1`–`V11` under `src/main/resources/db/migration` |
 | Hibernate | `ddl-auto=validate` in every profile |
 | Schema creation | Flyway only — Hibernate does not create tables |
 | Timestamps | `java.time.Instant` ↔ `timestamptz` (UTC) |
 | Money | `java.math.BigDecimal` ↔ `NUMERIC(19, 2)` |
+| Pool | HikariCP — explicit `maximum-pool-size` / timeouts via `DATABASE_POOL_*` |
 
 ## Logical model
 
@@ -150,11 +151,12 @@ products.active / price / name
 categories.slug             → unique
 orders.order_number         → unique
 orders.user_id / status
+orders (user_id, created_at, id) / (status, created_at, id) / (created_at, id) → V11 list sorts
 cart_items.product_id
 products.search_text        → generated column for ILIKE search (V7)
 ```
 
-Product text search uses case-insensitive `LIKE` on `search_text`. Leading-wildcard patterns will not use btree efficiently; accepted at portfolio scale.
+Product text search uses case-insensitive `LIKE` on `search_text`. Leading-wildcard patterns will not use btree efficiently; accepted at portfolio scale. Category reassignment pages products (default 100) so large categories do not load in one shot while still bumping `@Version` / `updated_at`.
 
 ## Migrations
 
@@ -171,6 +173,7 @@ V7__product_search.sql
 V8__categories_active_index.sql
 V9__order_number_sequence.sql
 V10__checkout_idempotency.sql
+V11__orders_list_indexes.sql
 ```
 
 Rules: integer versions, immutable after commit, one concern per file, no Hibernate “repair”.
@@ -198,7 +201,7 @@ One cart per user. Positive quantity. Unique `(cart_id, product_id)`; `addOrIncr
 - `order_number` format `ORD-YYYY-NNNNNN` from sequence `order_number_seq` (`OrderNumberGenerator`, V9)
 - Status lifecycle on `OrderStatus` (`canTransitionTo`, `isCancellable`)
 - Totals recomputed from line snapshots
-- Lines snapshot `product_name`, `sku`, `unit_price` at checkout
+- Lines snapshot `product_name`, `sku`, `unit_price` at checkout from the **locked** product row (not a stale cart copy)
 - Customer cancel allowed for `PENDING` / `CONFIRMED` only
 
 ### `checkout_idempotency_keys` (V10)
@@ -222,8 +225,8 @@ flowchart TD
   B -->|no| G
   G --> H[Lock cart FOR UPDATE]
   H --> I[Validate active + stock]
-  I --> J[Create order + snapshot lines]
-  J --> K[Decrease stock via InventoryService]
+  I --> J[Create order header]
+  J --> K[Per line: lock product, snapshot, decrease stock]
   K --> L[Clear cart]
   L --> M[Save idempotency row if keyed]
   M --> N[Commit]
@@ -239,7 +242,7 @@ Inventory is `products.stock_quantity`. `InventoryService` provides validate / i
 
 ## Seed data
 
-No automatic seed users or catalog bootstrap is shipped. Production must never load development credentials automatically. Provision `ADMIN` out-of-band when needed.
+Optional deterministic seed runs only when `SPRING_PROFILES_ACTIVE` includes `dev` and `app.seed.enabled=true` (`DevelopmentDataSeeder`): admin + customer users, three categories, fifteen products. Credentials are documented in the README as development-only. Production (`application-prod.yml`) forces `app.seed.enabled=false`.
 
 ## Related documents
 

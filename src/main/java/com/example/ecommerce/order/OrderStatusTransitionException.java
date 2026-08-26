@@ -1,20 +1,20 @@
 package com.example.ecommerce.order;
 
-/**
- * Raised when an order is asked to move to a status the lifecycle forbids.
- * Maps to a controlled business error (HTTP 409) once controllers exist.
- */
-public class OrderStatusTransitionException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+public class OrderStatusTransitionException extends DomainApiException {
 
     private final OrderStatus from;
     private final OrderStatus to;
 
-    public OrderStatusTransitionException(OrderStatus from, OrderStatus to) {
-        super("Order cannot move from " + from + " to " + to);
-        this.from = from;
-        this.to = to;
+    public OrderStatusTransitionException(OrderStatus current, OrderStatus target) {
+        super(
+                "ORDER_STATUS_TRANSITION",
+                HttpStatus.CONFLICT,
+                "Cannot transition order from %s to %s".formatted(current, target));
+        this.from = current;
+        this.to = target;
     }
 
     public OrderStatus getFrom() {

@@ -92,6 +92,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "cartforge.secretName" . }}
                   key: {{ .Values.secrets.jwtSecretKey }}
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cartforge.secretName" . }}
+                  key: REDIS_URL
             - name: TMPDIR
               value: /tmp/app
           startupProbe:

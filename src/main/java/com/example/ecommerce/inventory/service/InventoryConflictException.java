@@ -1,17 +1,14 @@
 package com.example.ecommerce.inventory.service;
 
-/**
- * Raised when a concurrent inventory update loses the optimistic lock.
- * Maps to HTTP 409 ({@code INVENTORY_CONFLICT}).
- */
-public class InventoryConflictException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+public class InventoryConflictException extends DomainApiException {
 
     private final Long productId;
 
     public InventoryConflictException(Long productId) {
-        super("Inventory for product " + productId + " was modified concurrently");
+        super("INVENTORY_CONFLICT", HttpStatus.CONFLICT, "Inventory conflict for product " + productId);
         this.productId = productId;
     }
 

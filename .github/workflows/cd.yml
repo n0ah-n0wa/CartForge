@@ -55,21 +55,36 @@ jobs:
 
     permissions:
       contents: read
+      actions: read
 
     steps:
       - name: Resolve deployment revision
         id: rev
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             SHA="${{ inputs.git_sha }}"
+            if [[ ! "${SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Refusing to deploy: expected a full 40-character git SHA, got '${SHA}'" >&2
+              exit 1
+            fi
+            RUN_ID="$(gh run list \
+              --repo "${{ github.repository }}" \
+              --workflow "Publish Image" \
+              --commit "${SHA}" \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty')"
+            if [[ -z "${RUN_ID}" ]]; then
+              echo "Refusing to deploy: no successful Publish Image run found for ${SHA}" >&2
+              exit 1
+            fi
+            echo "Verified Publish Image run ${RUN_ID} for ${SHA}"
           else
             SHA="${{ github.event.workflow_run.head_sha }}"
-          fi
-
-          if [[ ! "${SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Refusing to deploy: expected a full 40-character git SHA, got '${SHA}'" >&2
-            exit 1
           fi
 
           OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"

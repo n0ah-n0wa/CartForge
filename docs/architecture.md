@@ -35,7 +35,7 @@ flowchart TB
 ```text
 src/main/java/com/example/ecommerce/
 ├── auth/          # register, login, JWT issuance
-├── user/          # User entity, repository, DTOs (no public profile controller)
+├── user/          # User entity, repository, profile API (`GET /users/me`)
 ├── category/      # category CRUD + public list/get
 ├── product/       # product CRUD + search/filter/sort/page
 ├── cart/          # customer cart aggregate
@@ -150,7 +150,7 @@ Services own `@Transactional`. Controllers never open transactions.
 
 | Operation | Service | Notes |
 |---|---|---|
-| Checkout | `OrderService` | Cart lock → validate → order + lines → decrease stock → clear cart → optional idempotency row ([ADR 0009](adr/0009-transactional-checkout.md)) |
+| Checkout | `OrderService` | Cart lock → validate → order header → per line lock/snapshot/decrease stock → clear cart → optional idempotency ([ADR 0009](adr/0009-transactional-checkout.md)) |
 | Cancel | `OrderService` | Status transition + inventory restore |
 | Admin status | `AdminOrderService` | Validated `OrderStatus` transitions |
 | Inventory | `InventoryService` | Increase / decrease / restore |
@@ -197,13 +197,13 @@ Spring’s Redis health indicator is disabled for readiness; `FailOpenRedisHealt
 | Products | `GET` list/get public; writes admin; search query params |
 | Cart | `/api/v1/cart` (+ items) — authenticated customer |
 | Orders | `POST/GET/cancel` customer; `/api/v1/admin/orders` admin |
-| Actuator | `/actuator/health/**`, `/actuator/prometheus` public; other actuator denied |
+| Actuator | `/actuator/health/**` public; `/actuator/prometheus` public at app layer with **required prod NetworkPolicy**; other actuator denied |
 
-**Not implemented:** dedicated user-profile HTTP API (`/users/me`), automatic seed users.
+**Implemented:** `GET /api/v1/users/me` (authenticated profile). Optional deterministic **dev seed** (`app.seed.enabled`, profile `dev` only) creates admin/customer + catalog; production never enables seed.
 
 ## Cross-cutting
 
-- JWT Bearer; ownership from `CurrentUserProvider` (`sub` claim)
+- JWT Bearer; identity from `CurrentUserProvider` (`sub`); authorities from DB role on each request
 - Jakarta Validation at the edge
 - Allowlisted sort fields; max page size
 - Correlation ID on responses and error JSON

@@ -2,7 +2,7 @@ package com.example.ecommerce.order.service;
 
 import com.example.ecommerce.cart.entity.Cart;
 import com.example.ecommerce.cart.entity.CartItem;
-import com.example.ecommerce.cart.repository.CartRepository;
+import com.example.ecommerce.cart.service.CartCheckoutPort;
 import com.example.ecommerce.common.config.ApplicationProperties;
 import com.example.ecommerce.common.pagination.PageRequests;
 import com.example.ecommerce.common.pagination.PageResponse;
@@ -50,7 +50,7 @@ public class OrderService {
 
     private final CurrentUserProvider currentUserProvider;
     private final UserRepository userRepository;
-    private final CartRepository cartRepository;
+    private final CartCheckoutPort cartCheckoutPort;
     private final OrderRepository orderRepository;
     private final CheckoutIdempotencyKeyRepository checkoutIdempotencyKeyRepository;
     private final InventoryService inventoryService;
@@ -61,7 +61,7 @@ public class OrderService {
     public OrderService(
             CurrentUserProvider currentUserProvider,
             UserRepository userRepository,
-            CartRepository cartRepository,
+            CartCheckoutPort cartCheckoutPort,
             OrderRepository orderRepository,
             CheckoutIdempotencyKeyRepository checkoutIdempotencyKeyRepository,
             InventoryService inventoryService,
@@ -70,7 +70,7 @@ public class OrderService {
             ApplicationProperties properties) {
         this.currentUserProvider = currentUserProvider;
         this.userRepository = userRepository;
-        this.cartRepository = cartRepository;
+        this.cartCheckoutPort = cartCheckoutPort;
         this.orderRepository = orderRepository;
         this.checkoutIdempotencyKeyRepository = checkoutIdempotencyKeyRepository;
         this.inventoryService = inventoryService;
@@ -195,11 +195,7 @@ public class OrderService {
 
     private Order placeOrder(User customer, CheckoutCommand command) {
         long userId = customer.getId();
-        Cart cart = cartRepository.findWithItemsByUserIdForUpdate(userId)
-                .orElseThrow(EmptyCartException::new);
-        if (cart.isEmpty()) {
-            throw new EmptyCartException();
-        }
+        Cart cart = cartCheckoutPort.requireNonEmptyCartForCheckout(userId);
 
         for (CartItem line : sortedLines(cart)) {
             Product product = line.getProduct();
@@ -216,16 +212,19 @@ public class OrderService {
                 PersistenceConventions.DEFAULT_CURRENCY);
 
         for (CartItem line : sortedLines(cart)) {
-            Product product = line.getProduct();
-            // Snapshot current catalog price/name/sku onto the line, then debit stock.
-            order.addItem(product, line.getQuantity());
-            inventoryService.decreaseStock(product.getId(), line.getQuantity());
+            // Lock + refresh before snapshot so concurrent catalog price changes
+            // cannot charge a stale cart-graph copy while debiting the locked row.
+            Product locked = inventoryService.lockForCheckout(line.getProduct().getId());
+            if (!locked.isActive()) {
+                throw new InactiveProductForCheckoutException(locked.getId());
+            }
+            order.addItem(locked, line.getQuantity());
+            inventoryService.decreaseStock(locked.getId(), line.getQuantity());
         }
 
         Order saved = orderRepository.saveAndFlush(order);
 
-        cart.clear();
-        cartRepository.save(cart);
+        cartCheckoutPort.clearAfterCheckout(userId);
 
         return saved;
     }

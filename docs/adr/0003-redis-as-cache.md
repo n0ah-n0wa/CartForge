@@ -12,7 +12,11 @@ Catalog reads are read-heavy. The specification requires Redis and requires the 
 
 Use Spring Cache backed by Redis for product and category reads. Cache names (`CatalogCaches`): `product`, `category`, `products`, `categories` (keys such as `product:{id}`, `categories:active`).
 
-Write paths `@CacheEvict` affected entries (including list caches). On Redis failure: log a warning and read PostgreSQL. Redis is not in the readiness probe group.
+Write paths `@CacheEvict` affected entries (including list caches). **Inventory mutations** (`increaseStock` / `decreaseStock` / `restoreStock`) evict `product:{id}` and the `products` list cache so stock/`purchasable` cannot stay stale after checkout or cancel.
+
+JSON values use Jackson default typing with a **BasicPolymorphicTypeValidator** allowlist (`com.example.ecommerce.*` plus JDK value types) — not `LaissezFaireSubTypeValidator`. Compose and Helm demo Redis use `requirepass`; `REDIS_URL` (with credentials) is injected from a Secret, never a ConfigMap. Production Redis URLs must include AUTH credentials.
+
+On Redis failure: log a warning and read PostgreSQL. Redis is not in the readiness probe group.
 
 Redis must not store checkout idempotency as the sole record. See [ADR 0007](0007-checkout-idempotency.md).
 

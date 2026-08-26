@@ -1,8 +1,9 @@
 package com.example.ecommerce.category.service;
 
-public class DuplicateCategoryException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+public class DuplicateCategoryException extends DomainApiException {
 
     public enum Field {
         NAME("DUPLICATE_CATEGORY_NAME"),
@@ -22,9 +23,12 @@ public class DuplicateCategoryException extends RuntimeException {
     private final Field field;
 
     public DuplicateCategoryException(Field field, String value) {
-        super(field == Field.NAME
-                ? "Category name already exists: " + value
-                : "Category slug already exists: " + value);
+        super(
+                field.code(),
+                HttpStatus.CONFLICT,
+                field == Field.NAME
+                        ? "Category name already exists: " + value
+                        : "Category slug already exists: " + value);
         this.field = field;
     }
 

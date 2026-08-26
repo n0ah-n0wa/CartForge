@@ -7,6 +7,10 @@
 *.jks
 id_rsa
 id_rsa.pub
+# Real K8s Secret manifests must never be committed (use secret.example.yaml).
+k8s/secret.yaml
+**/secrets.yaml
+!**/secret.example.yaml
 
 # Maven
 target/
@@ -64,4 +68,5 @@ coverage/
 # Local Helm / Kubernetes overrides
 **/values-local.yaml
 **/values-secrets.yaml
+helm/cartforge/.rendered/
 *.tgz

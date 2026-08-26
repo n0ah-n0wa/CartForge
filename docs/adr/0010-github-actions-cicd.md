@@ -14,8 +14,8 @@ Use **three chained GitHub Actions workflows**:
 
 | Workflow | Trigger | Responsibility |
 |---|---|---|
-| **CI** | PR + push to `main` | `./mvnw verify`, Docker build (no push), Helm lint/template |
-| **Publish Image** | Successful CI on `main` (or manual SHA) | Push `ghcr.io/<owner>/ecommerce-api:<git-sha>` (+ `latest` on main) |
+| **CI** | PR + push to `main` | Single `./mvnw verify` gate, Docker build (no push), Helm lint/template (empty prod `image.tag` must fail) |
+| **Publish Image** | Successful CI on `main` (or manual SHA **with a successful CI run**) | Push `ghcr.io/<owner>/ecommerce-api:<git-sha>` (+ `latest` on main) using the **CI JAR artifact** (never `-DskipTests` rebuild) |
 | **CD** | Successful Publish on `main` (or manual SHA) | Helm upgrade `--atomic --wait` to Environment `production`, rollout status, smoke test |
 
 Production deploys always pin the **full git SHA** tag, never `latest`.
@@ -31,6 +31,7 @@ Smoke (`scripts/ci/smoke-test.sh`): readiness (incl. `db`), liveness, public cat
 | Single workflow for build+push+deploy | Harder least-privilege permissions; couples PR CI to prod credentials |
 | Deploy `:latest` | Non-reproducible rollbacks; ambiguous which commit is live |
 | Skip smoke / treat deploy as success on `helm upgrade` exit only | Masks readiness and wiring failures |
+| Manual publish with `mvn -DskipTests package` | Untested image can reach GHCR/CD; dispatch must reuse a green CI artifact |
 | Store JWT/DB passwords in GitHub Actions | Wrong trust boundary; belong in the cluster Secret |
 | Other CI hosts (Jenkins, etc.) | Spec/portfolio path is GitHub Actions + GHCR |
 

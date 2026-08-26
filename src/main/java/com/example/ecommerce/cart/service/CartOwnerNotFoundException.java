@@ -1,17 +1,11 @@
 package com.example.ecommerce.cart.service;
 
-public class CartOwnerNotFoundException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+public class CartOwnerNotFoundException extends DomainApiException {
 
-    private final Long userId;
-
-    public CartOwnerNotFoundException(Long userId) {
-        super("Authenticated cart owner was not found: " + userId);
-        this.userId = userId;
-    }
-
-    public Long getUserId() {
-        return userId;
+    public CartOwnerNotFoundException(long userId) {
+        super("CART_OWNER_NOT_FOUND", HttpStatus.UNAUTHORIZED, "Cart owner " + userId + " was not found");
     }
 }

@@ -1,14 +1,11 @@
 package com.example.ecommerce.inventory.service;
 
-/**
- * Raised when an inventory quantity is not strictly positive.
- * Maps to HTTP 400 ({@code INVALID_INVENTORY_QUANTITY}).
- */
-public class InvalidInventoryQuantityException extends RuntimeException {
+import com.example.ecommerce.common.exception.DomainApiException;
+import org.springframework.http.HttpStatus;
 
-    private static final long serialVersionUID = 1L;
+public class InvalidInventoryQuantityException extends DomainApiException {
 
     public InvalidInventoryQuantityException(String message) {
-        super(message);
+        super("INVALID_INVENTORY_QUANTITY", HttpStatus.BAD_REQUEST, message);
     }
 }

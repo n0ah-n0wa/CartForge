@@ -16,6 +16,8 @@ spring:
 app:
   cors:
     origins: ${CORS_ORIGINS:http://localhost:3000}
+  seed:
+    enabled: ${APP_SEED_ENABLED:true}
 
 springdoc:
   swagger-ui:
