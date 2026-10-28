@@ -1,5 +1,7 @@
 # CartForge
 
+[![CI](https://github.com/n0ah-n0wa/CartForge/actions/workflows/ci.yml/badge.svg)](https://github.com/n0ah-n0wa/CartForge/actions/workflows/ci.yml)
+
 Production-style e-commerce REST API implemented as a Java 21 modular monolith on Spring Boot 3.5.
 
 `SPECIFICATIONS.md` is the authoritative requirements document. This README describes the **current** repository state.
